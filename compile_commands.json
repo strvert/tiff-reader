@@ -1,0 +1,12 @@
+[
+{
+  "directory": "/home/strv/Documents/repo/tiff/build",
+  "command": "/usr/bin/c++ -I.././inc -fpermissive -g3 -O0 -std=gnu++2a -o CMakeFiles/tiff_test.dir/src/main.cpp.o -c /home/strv/Documents/repo/tiff/src/main.cpp",
+  "file": "/home/strv/Documents/repo/tiff/src/main.cpp"
+},
+{
+  "directory": "/home/strv/Documents/repo/tiff/build",
+  "command": "/usr/bin/c++ -I.././inc -fpermissive -g3 -O0 -std=gnu++2a -o CMakeFiles/tiff_test.dir/src/tiff_reader.cpp.o -c /home/strv/Documents/repo/tiff/src/tiff_reader.cpp",
+  "file": "/home/strv/Documents/repo/tiff/src/tiff_reader.cpp"
+}
+]

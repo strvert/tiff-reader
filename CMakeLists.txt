@@ -11,11 +11,17 @@ add_custom_target(exec
     DEPENDS ${CMAKE_PROJECT_NAME}
     )
 
+add_custom_target(copy_compile_commands ALL
+    COMMAND cp ${CMAKE_BINARY_DIR}/compile_commands.json ${CMAKE_SOURCE_DIR}
+    DEPENDS ${CMAKE_PROJECT_NAME}
+    )
+
 add_executable(${CMAKE_PROJECT_NAME}
-    main.cpp
+    src/main.cpp
+    src/tiff_reader.cpp
     )
 
 target_include_directories(${CMAKE_PROJECT_NAME}
-    PRIVATE inc
+    PRIVATE ./inc
     )
 
