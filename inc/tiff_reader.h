@@ -12,18 +12,24 @@ struct tiff_header {
 
 class tiff_reader {
 private:
-    std::string path;
+    const std::string path;
     intptr_t source;
+
+    tiff_header h;
 
 private:
     tiff_reader(const std::string& path);
+
+    void read_header();
+    static bool valid_header(const tiff_header& h);
 
 public:
     ~tiff_reader();
     static tiff_reader open(const std::string& path);
 
     bool is_valid();
-    void info();
+    void print_header();
+
 };
 
 #endif
