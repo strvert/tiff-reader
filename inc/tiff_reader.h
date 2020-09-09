@@ -1,6 +1,7 @@
 #ifndef __TIFF_READER_H
 #define __TIFF_READER_H
 
+#include <bits/stdint-uintn.h>
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -14,7 +15,10 @@
 
 namespace tiff {
 
-enum class data_types : uint16_t
+template<typename T>
+const std::map<T, const char*> enum_string_map = {};
+
+enum class data_t : uint16_t
 {
     BYTE,
     ASCII,
@@ -30,6 +34,44 @@ enum class data_types : uint16_t
     DOUBLE
 };
 
+template<>
+const std::map<data_t, const char*> enum_string_map<data_t> = {
+    {data_t::BYTE, "BYTE"},
+    {data_t::ASCII, "ASCII"},
+    {data_t::SHORT, "SHORT"},
+    {data_t::LONG, "LONG"},
+    {data_t::RATIONAL, "RATIONAL"},
+    {data_t::SBYTE, "SBYTE"},
+    {data_t::UNDEFINED, "UNDEFINED"},
+    {data_t::SSHORT, "SSHORT"},
+    {data_t::SLONG, "SLONG"},
+    {data_t::SRATIONAL, "SRATIONAL"},
+    {data_t::FLOAT, "FLOAT"},
+    {data_t::DOUBLE, "DOUBLE"}
+};
+
+enum class endian_t : uint8_t {
+    INVALID,
+    BIG,
+    LITTLE
+};
+
+template<>
+const std::map<endian_t, const char*> enum_string_map<endian_t> = {
+    {endian_t::INVALID, "INVALID"},
+    {endian_t::BIG, "BIG"},
+    {endian_t::LITTLE, "LITTLE"}
+};
+
+template<typename T>
+const char* to_string(T e)
+{
+    if (enum_string_map<T>.count(e)) {
+        return enum_string_map<T>[e];
+    }
+    return "";
+}
+
 struct header {
     char order[2];
     uint16_t version;
@@ -39,7 +81,7 @@ struct header {
 struct ifd_entry
 {
     uint16_t tag;
-    data_types field_type;
+    data_t field_type;
     uint32_t field_count;
     uint32_t data_field;
 };
@@ -60,6 +102,8 @@ private:
 public:
     template<typename T, size_t S>
     using check_swappable = typename std::enable_if<sizeof(T)==S && !std::is_pointer<T>::value && std::is_scalar<T>::value, std::true_type>::type;
+
+    // FIXME: I think there are other ways to write it besides the C-style cast.
     template<typename T>
     static auto bswap(const T& v)
         ->typename std::enable_if<check_swappable<T, 1>::value, T>::type
@@ -70,19 +114,19 @@ public:
     static auto bswap(const T& v)
         ->typename std::enable_if<check_swappable<T, 2>::value, T>::type
     {
-        return __builtin_bswap16(v);
+        return T(__builtin_bswap16(*reinterpret_cast<const uint16_t*>(&v)));
     }
     template<typename T>
     static auto bswap(const T& v)
         ->typename std::enable_if<check_swappable<T, 4>::value, T>::type
     {
-        return __builtin_bswap32(v);
+        return T(__builtin_bswap32(*reinterpret_cast<const uint32_t*>(&v)));
     }
     template<typename T>
     static auto bswap(const T& v)
         ->typename std::enable_if<check_swappable<T, 8>::value, T>::type
     {
-        return __builtin_bswap64(v);
+        return T(__builtin_bswap64(*reinterpret_cast<const uint64_t*>(v)));
     }
 
     template<typename T>
@@ -119,12 +163,11 @@ public:
             read(array[i]);
         }
     }
-};
 
-enum class endian_t : uint8_t {
-    INVALID,
-    BIG,
-    LITTLE
+    void seek_top()
+    {
+        looking = 0;
+    }
 };
 
 class reader {
@@ -137,6 +180,7 @@ private:
 
     header h;
     std::vector<ifd> ifds;
+    bool decoded = false;
 
 private:
     reader(const std::string& path);
@@ -163,9 +207,11 @@ public:
     bool is_valid() const;
     bool is_big_endian() const;
     bool is_little_endian() const;
-    void fetch_ifds(std::vector<ifd> &ifd_entries) const;
+    void fetch_ifds(std::vector<ifd> &ifds) const;
+    reader& decode();
 
     void print_header() const;
+    void print_info() const;
 
 public:
     static const std::map<uint16_t, std::function<void()>> tag_procs;

@@ -1,4 +1,5 @@
 #include "tiff_reader.h"
+#include <bits/stdint-uintn.h>
 #include <cstring>
 #include <algorithm>
 #include <vector>
@@ -107,7 +108,6 @@ bool reader::read_header()
         r.set_swap_mode(need_swap);
         r.read(h.version);
         r.read(h.offset);
-
     }
 
     info_buffer_unlock();
@@ -120,7 +120,7 @@ endian_t reader::check_endian_type(const char* const s)
 {
     if (std::memcmp(s, "MM", 2) == 0) {
         return endian_t::BIG;
-    } else if (std::memcmp(s, "II", 2)) {
+    } else if (std::memcmp(s, "II", 2) == 0) {
         return endian_t::LITTLE;
     } else {
         return endian_t::INVALID;
@@ -145,17 +145,39 @@ bool reader::is_little_endian() const
     return endi == endian_t::LITTLE;
 }
 
-void reader::fetch_ifds(std::vector<ifd> &ifd_entries) const
+void reader::fetch_ifds(std::vector<ifd> &ifds) const
 {
     using namespace tr_impl;
 
-    uint16_t c;
     info_buffer_lock();
-    fread_pos(&c, h.offset, sizeof(ifd::entry_count));
 
-    ifd_entries.emplace_back();
+    // TODO: In rare cases, there may be more multiple IFD.
+    ifds.resize(1);
+    buffer_reader r(info_buffer, need_swap);
+    fread_pos(info_buffer, h.offset, sizeof(ifd::entry_count));
+    r.read(ifds[0].entry_count);
+    ifds[0].entries.resize(ifds[0].entry_count);
+
+    size_t e_size = 12;
+    for (int i = 0; i < ifds[0].entry_count; i++) {
+        fread_pos(info_buffer, h.offset + 2 + i * e_size, e_size);
+        r.seek_top();
+        r.read(ifds[0].entries[i].tag);
+        r.read(ifds[0].entries[i].field_type);
+        r.read(ifds[0].entries[i].field_count);
+        r.read(ifds[0].entries[i].data_field);
+    }
+    fread_pos(info_buffer, h.offset, sizeof(ifd::next_ifd));
+    r.read(ifds[0].next_ifd);
 
     info_buffer_unlock();
+}
+
+reader& reader::decode()
+{
+    fetch_ifds(ifds);
+    decoded = true;
+    return *this;
 }
 
 void reader::print_header() const
@@ -163,6 +185,19 @@ void reader::print_header() const
     printf("order: %.2s\n", h.order);
     printf("version: %d\n", h.version);
     printf("offset: %d\n", h.offset);
+}
+
+void reader::print_info() const
+{
+    if (!decoded) {
+        printf("You must first call decode()\n");
+        return;
+    }
+
+    for(auto& e: ifds[0].entries) {
+        printf("tag: 0x%04x\n", e.tag);
+        printf("field type: %s\n", to_string(e.field_type));
+    }
 }
 
 void reader::image_width_tag()
