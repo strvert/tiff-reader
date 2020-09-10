@@ -1,5 +1,6 @@
 #include "tiff_reader.h"
 #include <bits/stdint-uintn.h>
+#include <bitset>
 #include <cstring>
 #include <algorithm>
 #include <vector>
@@ -45,26 +46,26 @@ namespace tr_impl {
 }
 static_assert(tr_impl::INFO_BUF_SIZE >= 16, "INFO_BUF_SIZE must be at least 16 bytes.");
 
-const std::map<uint16_t, std::function<void()>> reader::tag_procs = {
-    {0x0100, image_width_tag},
-    {0x0101, image_length_tag},
-    {0x0102, bits_per_sample_tag},
-    {0x0103, compression_tag},
-    {0x0106, photometric_interpretation_tag},
-    {0x0111, strip_offsets_tag},
-    {0x0116, rows_per_strip_tag},
-    {0x0117, strip_byte_counts_tag},
-    {0x011A, x_resolution_tag},
-    {0x011B, y_resolution_tag},
-    {0x0128, resolution_unit_tag},
-    {0x0140, color_map_tag},
-    {0x010E, image_description_tag},
-    {0x0115, samples_per_pixel_tag},
-    {0x0132, date_time_tag},
-    {0x0152, extra_samples_tag},
+const std::map<tag_t, std::function<bool(reader&, const tag_entry&)>> reader::tag_procs = {
+    {tag_t::IMAGE_WIDTH, tag_manager::image_width},
+    {tag_t::IMAGE_LENGTH, tag_manager::image_length},
+    {tag_t::BITS_PER_SAMPLE, tag_manager::bits_per_sample},
+    {tag_t::COMPRESSION, tag_manager::compression},
+    {tag_t::PHOTOMETRIC_INTERPRETATION, tag_manager::photometric_interpretation},
+    {tag_t::STRIP_OFFSETS, tag_manager::strip_offsets},
+    {tag_t::ROWS_PER_STRIP, tag_manager::rows_per_strip},
+    {tag_t::STRIP_BYTE_COUNTS, tag_manager::strip_byte_counts},
+    {tag_t::X_RESOLUTION, tag_manager::x_resolution},
+    {tag_t::Y_RESOLUTION, tag_manager::y_resolution},
+    {tag_t::RESOLUTION_UNIT, tag_manager::resolution_unit},
+    {tag_t::COLOR_MAP, tag_manager::color_map},
+    {tag_t::IMAGE_DESCRIPTION, tag_manager::image_description},
+    {tag_t::SAMPLES_PER_PIXEL, tag_manager::samples_per_pixel},
+    {tag_t::DATE_TIME, tag_manager::date_time},
+    {tag_t::EXTRA_SAMPLES, tag_manager::extra_samples},
 };
 
-reader::reader(const std::string& path) : path(path)
+reader::reader(const std::string& path) : path(path), bit_per_samples({1})
 {
     using namespace tr_impl;
     source = fopen(path.c_str(), "rb");
@@ -173,9 +174,27 @@ void reader::fetch_ifds(std::vector<ifd> &ifds) const
     info_buffer_unlock();
 }
 
+bool reader::read_entry_tags(const std::vector<ifd> &ifds)
+{
+    for(auto& e: ifds[0].entries) {
+        if (tag_procs.count(e.tag)) {
+            if(!tag_procs.at(e.tag)(*this, e)) {
+                return false;
+            }
+        } else {
+            printf("Tags id: 0x%04x is not implemented.\n", enum_base_cast(e.tag));
+        }
+    }
+    return true;
+}
+
 reader& reader::decode()
 {
     fetch_ifds(ifds);
+    if(!read_entry_tags(ifds)) {
+        return *this;
+    }
+
     decoded = true;
     return *this;
 }
@@ -195,74 +214,111 @@ void reader::print_info() const
     }
 
     for(auto& e: ifds[0].entries) {
-        printf("tag: 0x%04x\n", e.tag);
+        printf("tag: %s(0x%04x)\n", to_string(e.tag), enum_base_cast(e.tag));
         printf("field type: %s\n", to_string(e.field_type));
+        printf("field count: %d\n", e.field_count);
+        printf("data field: 0x%04x\n", e.data_field);
+        printf("\n");
     }
 }
 
-void reader::image_width_tag()
+bool reader::tag_manager::image_width(reader &r, const tag_entry &e)
 {
-
+    switch (e.field_type) {
+        case data_t::SHORT:
+            r.width = read_scalar<uint16_t>(r, e);
+            break;
+        case data_t::LONG:
+            r.width = read_scalar<uint32_t>(r, e);
+            break;
+        default:
+            break;
+    }
+    return true;
 }
-void reader::image_length_tag()
+bool reader::tag_manager::image_length(reader &r, const tag_entry &e)
 {
-
+    switch (e.field_type) {
+        case data_t::SHORT:
+            r.height = read_scalar<uint16_t>(r, e);
+            break;
+        case data_t::LONG:
+            r.height = read_scalar<uint32_t>(r, e);
+            break;
+        default:
+            break;
+    }
+    return true;
 }
-void reader::bits_per_sample_tag()
+bool reader::tag_manager::bits_per_sample(reader &r, const tag_entry &e)
 {
+    using namespace tr_impl;
 
+    r.bit_per_samples.resize(e.field_count);
+    if (e.field_count * sizeof(uint16_t) > sizeof(uint32_t)) {
+        size_t ptr = read_scalar<uint32_t>(r, e);
+        info_buffer_lock();
+        r.fread_pos(info_buffer, ptr, e.field_count * sizeof(uint16_t));
+        buffer_reader rd(info_buffer, r.need_swap);
+        rd.read_array(r.bit_per_samples);
+        info_buffer_unlock();
+    } else {
+        r.bit_per_samples[0] = read_scalar<uint16_t>(r, e);
+    }
+    return true;
 }
-void reader::compression_tag()
+bool reader::tag_manager::compression(reader &r, const tag_entry &e)
 {
-
+    std::cout << __FUNCTION__ << std::endl;
+    return true;
 }
-void reader::photometric_interpretation_tag()
+bool reader::tag_manager::photometric_interpretation(reader &r, const tag_entry&)
 {
-
+    return true;
 }
-void reader::strip_offsets_tag()
+bool reader::tag_manager::strip_offsets(reader &r, const tag_entry&)
 {
-
+    return true;
 }
-void reader::rows_per_strip_tag()
+bool reader::tag_manager::rows_per_strip(reader &r, const tag_entry&)
 {
-
+    return true;
 }
-void reader::strip_byte_counts_tag()
+bool reader::tag_manager::strip_byte_counts(reader &r, const tag_entry&)
 {
-
+    return true;
 }
-void reader::x_resolution_tag()
+bool reader::tag_manager::x_resolution(reader &r, const tag_entry&)
 {
-
+    return true;
 }
-void reader::y_resolution_tag()
+bool reader::tag_manager::y_resolution(reader &r, const tag_entry&)
 {
-
+    return true;
 }
-void reader::resolution_unit_tag()
+bool reader::tag_manager::resolution_unit(reader &r, const tag_entry&)
 {
-
+    return true;
 }
-void reader::color_map_tag()
+bool reader::tag_manager::color_map(reader &r, const tag_entry&)
 {
-
+    return true;
 }
-void reader::image_description_tag()
+bool reader::tag_manager::image_description(reader &r, const tag_entry&)
 {
-
+    return true;
 }
-void reader::samples_per_pixel_tag()
+bool reader::tag_manager::samples_per_pixel(reader &r, const tag_entry&)
 {
-
+    return true;
 }
-void reader::date_time_tag()
+bool reader::tag_manager::date_time(reader &r, const tag_entry&)
 {
-
+    return true;
 }
-void reader::extra_samples_tag()
+bool reader::tag_manager::extra_samples(reader &r, const tag_entry&)
 {
-
+    return true;
 }
 
 }
