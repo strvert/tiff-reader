@@ -18,15 +18,15 @@ namespace tiff {
 
 template<typename T>
 constexpr auto enum_base_cast(T e)
-    -> typename std::underlying_type<T>::type
+    -> std::underlying_type_t<T>
 {
-    return static_cast<typename std::underlying_type<T>::type>(e);
+    return static_cast<std::underlying_type_t<T>>(e);
 }
 
 template<typename T>
 const std::map<T, const char*> string_map = {};
 
-template<typename T>
+template<typename T, std::enable_if_t<std::is_enum<T>::value, std::nullptr_t> = nullptr>
 const char* to_string(T e)
 {
     if (string_map<T>.count(e)) {
@@ -44,30 +44,30 @@ private:
 
 public:
     template<typename T, size_t S>
-    using check_swappable = typename std::enable_if<sizeof(T)==S && !std::is_pointer<T>::value && std::is_scalar<T>::value, std::true_type>::type;
+    using check_swappable = std::enable_if_t<sizeof(T)==S && !std::is_pointer<T>::value && std::is_scalar<T>::value, std::true_type>;
 
     // FIXME: I think there are other ways to write it besides the C-style cast.
     template<typename T>
     static auto bswap(const T& v)
-        ->typename std::enable_if<check_swappable<T, 1>::value, T>::type
+        -> std::enable_if_t<check_swappable<T, 1>::value, T>
     {
         return v;
     }
     template<typename T>
     static auto bswap(const T& v)
-        ->typename std::enable_if<check_swappable<T, 2>::value, T>::type
+        -> std::enable_if_t<check_swappable<T, 2>::value, T>
     {
         return T(__builtin_bswap16(*reinterpret_cast<const uint16_t*>(&v)));
     }
     template<typename T>
     static auto bswap(const T& v)
-        ->typename std::enable_if<check_swappable<T, 4>::value, T>::type
+        -> std::enable_if_t<check_swappable<T, 4>::value, T>
     {
         return T(__builtin_bswap32(*reinterpret_cast<const uint32_t*>(&v)));
     }
     template<typename T>
     static auto bswap(const T& v)
-        ->typename std::enable_if<check_swappable<T, 8>::value, T>::type
+        -> std::enable_if_t<check_swappable<T, 8>::value, T>
     {
         return T(__builtin_bswap64(*reinterpret_cast<const uint64_t*>(v)));
     }
@@ -213,7 +213,7 @@ const std::map<tag_t, const char*> string_map<tag_t> = {
     {tag_t::EXTRA_SAMPLES,              "Extra Samples"},
 };
 
-enum class compression_t : uint32_t {
+enum class compression_t : uint16_t {
     NONE                = 1,
     CCITTRLE            = 2,
     CCITTFAX3           = 3,
@@ -222,6 +222,20 @@ enum class compression_t : uint32_t {
     OJPEG               = 6,
     JPEG                = 7,
     DEFLATE             = 8, // zip
+    PACKBITS            = 32773,
+};
+
+template<>
+const std::map<compression_t, const char*> string_map<compression_t> = {
+    {compression_t::NONE,       "None"},
+    {compression_t::CCITTRLE,   "CCITT modified Huffman RLE"},
+    {compression_t::CCITTFAX3,  "CCITT Group 3 fax encoding"},
+    {compression_t::CCITTFAX4,  "CCITT Group 4 fax encoding"},
+    {compression_t::LZW,        "LZW"},
+    {compression_t::OJPEG,      "JPEG ('old-style' JPEG)"},
+    {compression_t::JPEG,       "JPEG ('new-style' JPEG)"},
+    {compression_t::DEFLATE,    "Deflate ('Adobe-style', 'zip')"}, // zip
+    {compression_t::PACKBITS,   "PackBits"},
 };
 
 struct header
@@ -299,35 +313,35 @@ public:
     const static std::map<tag_t, std::function<bool(reader&, const tag_entry&)>> tag_procs;
 
 private:
-struct tag_manager
-{
-    template<typename T>
-    static T read_scalar(const reader& r, const tag_entry &e)
+    struct tag_manager
     {
-        if (r.need_swap) {
-            return e.data_field >> ((sizeof(e.data_field) - sizeof(T)) * 8);
-        } else {
-            return e.data_field;
+        template<typename T>
+        static T read_scalar(const reader& r, const tag_entry &e)
+        {
+            if (r.need_swap) {
+                return e.data_field >> ((sizeof(e.data_field) - sizeof(T)) * 8);
+            } else {
+                return e.data_field;
+            }
         }
-    }
 
-    static bool image_width(reader&, const tag_entry&);
-    static bool image_length(reader&, const tag_entry&);
-    static bool bits_per_sample(reader&, const tag_entry&);
-    static bool compression(reader&, const tag_entry&);
-    static bool photometric_interpretation(reader&, const tag_entry&);
-    static bool strip_offsets(reader&, const tag_entry&);
-    static bool rows_per_strip(reader&, const tag_entry&);
-    static bool strip_byte_counts(reader&, const tag_entry&);
-    static bool x_resolution(reader&, const tag_entry&);
-    static bool y_resolution(reader&, const tag_entry&);
-    static bool resolution_unit(reader&, const tag_entry&);
-    static bool color_map(reader&, const tag_entry&);
-    static bool image_description(reader&, const tag_entry&);
-    static bool samples_per_pixel(reader&, const tag_entry&);
-    static bool date_time(reader&, const tag_entry&);
-    static bool extra_samples(reader&, const tag_entry&);
-};
+        static bool image_width(reader&, const tag_entry&);
+        static bool image_length(reader&, const tag_entry&);
+        static bool bits_per_sample(reader&, const tag_entry&);
+        static bool compression(reader&, const tag_entry&);
+        static bool photometric_interpretation(reader&, const tag_entry&);
+        static bool strip_offsets(reader&, const tag_entry&);
+        static bool rows_per_strip(reader&, const tag_entry&);
+        static bool strip_byte_counts(reader&, const tag_entry&);
+        static bool x_resolution(reader&, const tag_entry&);
+        static bool y_resolution(reader&, const tag_entry&);
+        static bool resolution_unit(reader&, const tag_entry&);
+        static bool color_map(reader&, const tag_entry&);
+        static bool image_description(reader&, const tag_entry&);
+        static bool samples_per_pixel(reader&, const tag_entry&);
+        static bool date_time(reader&, const tag_entry&);
+        static bool extra_samples(reader&, const tag_entry&);
+    };
 };
 
 

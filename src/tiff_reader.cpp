@@ -270,6 +270,7 @@ bool reader::tag_manager::bits_per_sample(reader &r, const tag_entry &e)
 bool reader::tag_manager::compression(reader &r, const tag_entry &e)
 {
     std::cout << __FUNCTION__ << std::endl;
+    std::cout << read_scalar<uint16_t>(r, e) << std::endl;
     return true;
 }
 bool reader::tag_manager::photometric_interpretation(reader &r, const tag_entry&)
