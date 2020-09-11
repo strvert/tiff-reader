@@ -191,6 +191,7 @@ enum class tag_t : uint16_t {
     STRIP_BYTE_COUNTS           = 0x0117,
     X_RESOLUTION                = 0x011A,
     Y_RESOLUTION                = 0x011B,
+    PLANAR_CONFIGURATION        = 0x011C,
     RESOLUTION_UNIT             = 0x0128,
     COLOR_MAP                   = 0x0140,
     IMAGE_DESCRIPTION           = 0x010E,
@@ -212,6 +213,7 @@ const std::map<tag_t, const char*> string_map<tag_t> = {
     {tag_t::STRIP_BYTE_COUNTS,          "Strip Byte Counts"},
     {tag_t::X_RESOLUTION,               "X Resolution"},
     {tag_t::Y_RESOLUTION,               "Y Resolution"},
+    {tag_t::PLANAR_CONFIGURATION,       "Planar Configuration"},
     {tag_t::RESOLUTION_UNIT,            "Resolution Unit"},
     {tag_t::COLOR_MAP,                  "Color Map"},
     {tag_t::IMAGE_DESCRIPTION,          "Image Description"},
@@ -257,13 +259,13 @@ enum class colorspace_t : uint16_t {
 
 template<>
 const std::map<colorspace_t, const char*> string_map<colorspace_t> = {
-    {colorspace_t::MINISWHITE, "WhiteIsZero"},
-    {colorspace_t::MINISBLACK, "BlackIsZero"},
-    {colorspace_t::RGB, "RGB"},
-    {colorspace_t::PALETTE, "Palette color"},
-    {colorspace_t::MASK, "Transparency Mask"},
-    {colorspace_t::SEPARATED, "CMYK"},
-    {colorspace_t::YCBCR, "YCbCr"},
+    {colorspace_t::MINISWHITE,  "WhiteIsZero"},
+    {colorspace_t::MINISBLACK,  "BlackIsZero"},
+    {colorspace_t::RGB,         "RGB"},
+    {colorspace_t::PALETTE,     "Palette color"},
+    {colorspace_t::MASK,        "Transparency Mask"},
+    {colorspace_t::SEPARATED,   "CMYK"},
+    {colorspace_t::YCBCR,       "YCbCr"},
 };
 
 enum class extra_data_t : uint16_t
@@ -275,9 +277,21 @@ enum class extra_data_t : uint16_t
 
 template<>
 const std::map<extra_data_t, const char*> string_map<extra_data_t> = {
-    {extra_data_t::UNSPECIFIED, "Unspecified"},
-    {extra_data_t::ASSOCALPHA, "Associated alpha (pre-multiplied aplha)"},
-    {extra_data_t::UNASSALPHA, "Unassociated alpha"},
+    {extra_data_t::UNSPECIFIED,     "Unspecified"},
+    {extra_data_t::ASSOCALPHA,      "Associated alpha (pre-multiplied aplha)"},
+    {extra_data_t::UNASSALPHA,      "Unassociated alpha"},
+};
+
+enum class planar_configuration_t : uint16_t
+{
+    CONTIG = 1,
+    SEPARATE = 2
+};
+
+template<>
+const std::map<planar_configuration_t, const char*> string_map<planar_configuration_t> = {
+    {planar_configuration_t::CONTIG,    "Contig"},
+    {planar_configuration_t::SEPARATE,  "Separate"},
 };
 
 struct header
@@ -308,18 +322,61 @@ struct rational_t
     uint32_t den;
 };
 
+struct color_t
+{
+    uint8_t r = 0;
+    uint8_t g = 0;
+    uint8_t b = 0;
+    uint8_t a = 0;
+};
+
 class page
 {
+    friend class reader;
 public:
     page(page&&) noexcept = default;
-private:
-    friend class reader;
-    page() : bit_per_samples({1}), sample_per_pixel(1), extra_sample_counts(0) {}
+    void print_info() const;
+    color_t get_pixel(const uint16_t x, const uint16_t y) const;
 
+
+private:
+    page(const class reader& r) :
+        r(r), bit_per_samples({1}), sample_per_pixel(1), extra_sample_counts(0),
+        planar_configuration(planar_configuration_t::CONTIG)
+    {}
+
+    template<typename T>
+    static T extract_memory(const void* buffer, const uint16_t pos, const uint16_t len_bits)
+    {
+        const auto bytes = reinterpret_cast<const uint8_t*>(buffer);
+
+        const uint16_t eb = pos + len_bits;
+        const uint16_t se = pos / 8;
+        const uint16_t ee = eb / 8;
+
+        const uint8_t ee_len = eb % 8;
+        const uint16_t incld_full_bytes = ee - se - 1;
+
+        T ret = 0;
+        for (uint16_t e = se, i = 0; e <= ee; e++, i++) {
+            if (e == ee) {
+                ret |= bytes[e] >> (8 - ee_len);
+            } else {
+                ret |= bytes[e] << ((incld_full_bytes - i) * 8 + ee_len);
+            }
+        }
+
+        return ret;
+    }
+
+    const class reader& r;
+
+public:
     uint32_t width;
     uint32_t height;
     std::vector<uint16_t> bit_per_samples;
     uint16_t sample_per_pixel;
+    uint16_t byte_per_pixel;
     compression_t compression;
     colorspace_t colorspace;
     std::vector<uint16_t> color_palette;
@@ -331,15 +388,14 @@ private:
     extra_data_t extra_sample_type;
     rational_t x_resolution;
     rational_t y_resolution;
+    planar_configuration_t planar_configuration;
 
     std::string description;
     std::string date_time;
-
-public:
-    void print_info() const;
 };
 
 class reader {
+    friend color_t page::get_pixel(const uint16_t, const uint16_t) const;
 private:
     const std::string path;
     intptr_t source;
@@ -402,7 +458,7 @@ public:
     bool is_little_endian() const;
     void fetch_ifds(std::vector<ifd> &ifds) const;
     bool read_entry_tags(const std::vector<ifd> &ifds, std::vector<page> &pages);
-    const page& get_page(uint32_t index) const;
+    const page& get_page(uint32_t index) &;
     uint32_t get_page_count() const;
 
     void print_header() const;
@@ -450,6 +506,7 @@ private:
         static bool strip_byte_counts(const reader&, const tag_entry&, page&);
         static bool x_resolution(const reader&, const tag_entry&, page&);
         static bool y_resolution(const reader&, const tag_entry&, page&);
+        static bool planar_configuration(const reader&, const tag_entry&, page&);
         static bool resolution_unit(const reader&, const tag_entry&, page&);
         static bool color_map(const reader&, const tag_entry&, page&);
         static bool image_description(const reader&, const tag_entry&, page&);

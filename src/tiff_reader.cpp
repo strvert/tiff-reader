@@ -1,4 +1,5 @@
 #include "tiff_reader.h"
+#include <bits/stdint-intn.h>
 #include <bits/stdint-uintn.h>
 #include <bitset>
 #include <cstddef>
@@ -45,6 +46,14 @@ namespace tr_impl {
     inline void info_buffer_unlock() {
         info_buf_mtx.unlock();
     }
+
+    inline void pix_buffer_lock() {
+        pix_buf_mtx.lock();
+    }
+
+    inline void pix_buffer_unlock() {
+        pix_buf_mtx.unlock();
+    }
 }
 static_assert(tr_impl::INFO_BUF_SIZE >= 16, "INFO_BUF_SIZE must be at least 16 bytes.");
 
@@ -59,6 +68,7 @@ const std::map<tag_t, std::function<bool(const reader&, const tag_entry&, page&)
     {tag_t::STRIP_BYTE_COUNTS, tag_manager::strip_byte_counts},
     {tag_t::X_RESOLUTION, tag_manager::x_resolution},
     {tag_t::Y_RESOLUTION, tag_manager::y_resolution},
+    {tag_t::PLANAR_CONFIGURATION, tag_manager::planar_configuration},
     {tag_t::RESOLUTION_UNIT, tag_manager::resolution_unit},
     {tag_t::COLOR_MAP, tag_manager::color_map},
     {tag_t::IMAGE_DESCRIPTION, tag_manager::image_description},
@@ -79,7 +89,7 @@ void page::print_info() const
     printf("Photometric Interpretation: %s\n", to_string(colorspace));
     printf("%ld Strips:\n", strip_offsets.size());
     for (int i = 0; i < strip_offsets.size(); i++) {
-        printf("\t%d: [%10d]\n", i, strip_offsets[i]);
+        printf("\t%d: [%10d, %10d]\n", i, strip_offsets[i], strip_byte_counts[i]);
     }
     printf("Samples/Pixel: %d\n", sample_per_pixel);
     printf("Rows/Strip: %d\n", rows_per_strip);
@@ -90,6 +100,37 @@ void page::print_info() const
     if (date_time.length() != 0) {
         printf("Date Time: %s\n", date_time.c_str());
     }
+}
+
+color_t page::get_pixel(const uint16_t x, const uint16_t y) const
+{
+    using namespace tr_impl;
+
+    uint32_t ptr = (y*width + x) * byte_per_pixel;
+    uint16_t target_strip = 0;
+    uint32_t total_byte = 0;
+    for (auto& s: strip_byte_counts) {
+        if (total_byte + s > ptr) break;
+        total_byte += s;
+        target_strip++;
+    }
+
+    ptr -= total_byte;
+
+    pix_buffer_lock();
+    r.fread_pos(info_buffer, strip_offsets[target_strip] + ptr, byte_per_pixel);
+
+    color_t c;
+    uint8_t* c_u8[4] = {&c.r, &c.g, &c.b, &c.a};
+    uint8_t i = 0;
+    uint8_t start_pos = 0;
+    for (auto& b: bit_per_samples) {
+        *c_u8[i++] = extract_memory<uint8_t>(info_buffer, start_pos, b);
+        start_pos += b;
+    }
+    pix_buffer_unlock();
+
+    return c;
 }
 
 reader::reader(const std::string& path) :
@@ -103,6 +144,7 @@ reader::reader(const std::string& path) :
     if(!read_header()) {
         fclose(source);
         source = 0;
+        return;
     }
     decode();
 }
@@ -226,7 +268,7 @@ void reader::decode()
 {
     fetch_ifds(ifds);
     for (auto& i: ifds) {
-        pages.push_back(page());
+        pages.push_back(page(*this));
     }
 
     if(!read_entry_tags(ifds, pages)) {
@@ -236,7 +278,7 @@ void reader::decode()
     decoded = true;
 }
 
-const page& reader::get_page(uint32_t index) const
+const page& reader::get_page(uint32_t index) &
 {
     return pages[index];
 }
@@ -269,15 +311,23 @@ bool reader::tag_manager::bits_per_sample(const reader &r, const tag_entry &e, p
     using namespace tr_impl;
 
     if (e.data_field <= 0) return false;
-    p.bit_per_samples.resize(e.field_count);
     if (e.field_count * sizeof(uint16_t) > sizeof(uint32_t)) {
+        p.bit_per_samples.resize(e.field_count);
         uint32_t ptr = read_scalar<uint32_t>(r, e);
         info_buffer_lock();
         r.fread_array_buffering(p.bit_per_samples, info_buffer, INFO_BUF_SIZE, ptr);
         info_buffer_unlock();
     } else {
+        p.bit_per_samples.resize(1);
         p.bit_per_samples[0] = read_scalar<uint16_t>(r, e);
     }
+
+    uint16_t total_bits = 0;
+    for (auto& b: p.bit_per_samples) {
+        total_bits += b;
+    }
+    if (total_bits % 8 != 0) return false;
+    p.byte_per_pixel = total_bits / 8;
     return true;
 }
 bool reader::tag_manager::compression(const reader &r, const tag_entry &e, page& p)
@@ -351,6 +401,12 @@ bool reader::tag_manager::x_resolution(const reader&, const tag_entry&, page&)
 bool reader::tag_manager::y_resolution(const reader&, const tag_entry&, page&)
 {
     // Not yet implemented
+    return true;
+}
+bool reader::tag_manager::planar_configuration(const reader &r, const tag_entry &e, page &p)
+{
+    p.planar_configuration = static_cast<planar_configuration_t>(read_scalar<uint16_t>(r, e));
+    if (p.planar_configuration != planar_configuration_t::CONTIG) return false;
     return true;
 }
 bool reader::tag_manager::resolution_unit(const reader&, const tag_entry&, page&)
