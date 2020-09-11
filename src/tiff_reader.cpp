@@ -48,7 +48,7 @@ namespace tr_impl {
 }
 static_assert(tr_impl::INFO_BUF_SIZE >= 16, "INFO_BUF_SIZE must be at least 16 bytes.");
 
-const std::map<tag_t, std::function<bool(reader&, const tag_entry&)>> reader::tag_procs = {
+const std::map<tag_t, std::function<bool(const reader&, const tag_entry&, page&)>> reader::tag_procs = {
     {tag_t::IMAGE_WIDTH, tag_manager::image_width},
     {tag_t::IMAGE_LENGTH, tag_manager::image_length},
     {tag_t::BITS_PER_SAMPLE, tag_manager::bits_per_sample},
@@ -67,9 +67,33 @@ const std::map<tag_t, std::function<bool(reader&, const tag_entry&)>> reader::ta
     {tag_t::EXTRA_SAMPLES, tag_manager::extra_samples},
 };
 
+void page::print_info() const
+{
+    printf("Image Width: %d Image Height: %d\n", width, height);
+    printf("Bits/Sample: ");
+    for (auto& bps: bit_per_samples) {
+        printf("%d ", bps);
+    }
+    printf("\n");
+    printf("Compression Scheme: %s\n", to_string(compression));
+    printf("Photometric Interpretation: %s\n", to_string(colorspace));
+    printf("%ld Strips:\n", strip_offsets.size());
+    for (int i = 0; i < strip_offsets.size(); i++) {
+        printf("\t%d: [%10d]\n", i, strip_offsets[i]);
+    }
+    printf("Samples/Pixel: %d\n", sample_per_pixel);
+    printf("Rows/Strip: %d\n", rows_per_strip);
+    printf("Extra Samples: %d <%s>\n", extra_sample_counts, to_string(extra_sample_type));
+    if (description.length() != 0) {
+        printf("Description: %s\n", description.c_str());
+    }
+    if (date_time.length() != 0) {
+        printf("Date Time: %s\n", date_time.c_str());
+    }
+}
+
 reader::reader(const std::string& path) :
-    path(path), bit_per_samples({1}), sample_per_pixel(1),
-    extra_sample_counts(0)
+    path(path)
 {
     using namespace tr_impl;
     source = fopen(path.c_str(), "rb");
@@ -80,6 +104,7 @@ reader::reader(const std::string& path) :
         fclose(source);
         source = 0;
     }
+    decode();
 }
 
 reader::~reader()
@@ -114,7 +139,6 @@ bool reader::read_header()
         r.read(h.version);
         r.read(h.offset);
     }
-
     info_buffer_unlock();
 
     if (h.version != 42) return false;
@@ -178,31 +202,48 @@ void reader::fetch_ifds(std::vector<ifd> &ifds) const
     info_buffer_unlock();
 }
 
-bool reader::read_entry_tags(const std::vector<ifd> &ifds)
+bool reader::read_entry_tags(const std::vector<ifd> &ifds, std::vector<page> &pages)
 {
-    for(auto& e: ifds[0].entries) {
-        if (tag_procs.count(e.tag)) {
-            if(!tag_procs.at(e.tag)(*this, e)) {
-                printf("Tag %s(", to_string(e.tag));
-                printf("0x%04X) process failed.\n", enum_base_cast(e.tag));
-                return false;
+    uint32_t page_index = 0;
+    for (auto& ifd: ifds) {
+        for(auto& e: ifd.entries) {
+            if (tag_procs.count(e.tag)) {
+                if(!tag_procs.at(e.tag)(*this, e, pages[page_index])) {
+                    printf("Tag %s(", to_string(e.tag));
+                    printf("0x%04X) process failed.\n", enum_base_cast(e.tag));
+                    return false;
+                }
+            } else {
+                // printf("Tags id: 0x%04X is not implemented.\n", enum_base_cast(e.tag));
             }
-        } else {
-            // printf("Tags id: 0x%04X is not implemented.\n", enum_base_cast(e.tag));
         }
+        page_index++;
     }
     return true;
 }
 
-reader& reader::decode()
+void reader::decode()
 {
     fetch_ifds(ifds);
-    if(!read_entry_tags(ifds)) {
-        return *this;
+    for (auto& i: ifds) {
+        pages.push_back(page());
+    }
+
+    if(!read_entry_tags(ifds, pages)) {
+        return;
     }
 
     decoded = true;
-    return *this;
+}
+
+const page& reader::get_page(uint32_t index) const
+{
+    return pages[index];
+}
+
+uint32_t reader::get_page_count() const
+{
+    return pages.size();
 }
 
 void reader::print_header() const
@@ -212,86 +253,48 @@ void reader::print_header() const
     printf("offset: %d\n", h.offset);
 }
 
-void reader::print_info() const
+bool reader::tag_manager::image_width(const reader &r, const tag_entry &e, page& p)
 {
-    if (!decoded) {
-        printf("Decoding is not complete.\n");
-        return;
-    }
-
-    // for(auto& e: ifds[0].entries) {
-    //     printf("tag: %s(0x%04x)\n", to_string(e.tag), enum_base_cast(e.tag));
-    //     printf("field type: %s\n", to_string(e.field_type));
-    //     printf("field count: %d\n", e.field_count);
-    //     printf("data field: 0x%04x\n", e.data_field);
-    //     printf("\n");
-    // }
-
-    // The output infomation based on tiffinfo.
-    printf("Image Width: %d Image Height: %d\n", width, height);
-    printf("Bits/Sample: ");
-    for (auto& bps: bit_per_samples) {
-        printf("%d ", bps);
-    }
-    printf("\n");
-    printf("Compression Scheme: %s\n", to_string(compression));
-    printf("Photometric Interpretation: %s\n", to_string(colorspace));
-    printf("%ld Strips:\n", strip_offsets.size());
-    for (int i = 0; i < strip_offsets.size(); i++) {
-        printf("\t%d: [%10d]\n", i, strip_offsets[i]);
-    }
-    printf("Samples/Pixel: %d\n", sample_per_pixel);
-    printf("Rows/Strip: %d\n", rows_per_strip);
-    printf("Extra Samples: %d <%s>\n", extra_sample_counts, to_string(extra_sample_type));
-    if (description.length() != 0) {
-        printf("Description: %s\n", description.c_str());
-    }
-    if (date_time.length() != 0) {
-        printf("Date Time: %s\n", date_time.c_str());
-    }
-}
-
-bool reader::tag_manager::image_width(reader &r, const tag_entry &e)
-{
-    r.width = read_scalar_generic(r, e);
+    r.print_header();
+    p.width = read_scalar_generic(r, e);
     return true;
 }
-bool reader::tag_manager::image_length(reader &r, const tag_entry &e)
+bool reader::tag_manager::image_length(const reader &r, const tag_entry &e, page& p)
 {
-    r.height = read_scalar_generic(r, e);
+    p.height = read_scalar_generic(r, e);
     return true;
 }
-bool reader::tag_manager::bits_per_sample(reader &r, const tag_entry &e)
+bool reader::tag_manager::bits_per_sample(const reader &r, const tag_entry &e, page& p)
 {
     using namespace tr_impl;
 
     if (e.data_field <= 0) return false;
-    r.bit_per_samples.resize(e.field_count);
+    p.bit_per_samples.resize(e.field_count);
     if (e.field_count * sizeof(uint16_t) > sizeof(uint32_t)) {
         uint32_t ptr = read_scalar<uint32_t>(r, e);
         info_buffer_lock();
-        r.fread_array_buffering(r.bit_per_samples, info_buffer, INFO_BUF_SIZE, ptr);
+        r.fread_array_buffering(p.bit_per_samples, info_buffer, INFO_BUF_SIZE, ptr);
         info_buffer_unlock();
     } else {
-        r.bit_per_samples[0] = read_scalar<uint16_t>(r, e);
+        p.bit_per_samples[0] = read_scalar<uint16_t>(r, e);
     }
     return true;
 }
-bool reader::tag_manager::compression(reader &r, const tag_entry &e)
+bool reader::tag_manager::compression(const reader &r, const tag_entry &e, page& p)
 {
     auto c = static_cast<compression_t>(read_scalar<uint16_t>(r, e));
     if (c != compression_t::NONE) {
         printf("Compressed tiff is not supported.\n");
         return false;
     }
-    r.compression = c;
+    p.compression = c;
     return true;
 }
-bool reader::tag_manager::photometric_interpretation(reader &r, const tag_entry &e)
+bool reader::tag_manager::photometric_interpretation(const reader &r, const tag_entry &e, page& p)
 {
-    r.colorspace = static_cast<colorspace_t>(read_scalar<uint16_t>(r, e));
-    if (r.colorspace == colorspace_t::MINISBLACK);
-    switch (r.colorspace) {
+    p.colorspace = static_cast<colorspace_t>(read_scalar<uint16_t>(r, e));
+    if (p.colorspace == colorspace_t::MINISBLACK);
+    switch (p.colorspace) {
     case colorspace_t::MINISBLACK:
     case colorspace_t::MINISWHITE:
     case colorspace_t::RGB:
@@ -303,59 +306,59 @@ bool reader::tag_manager::photometric_interpretation(reader &r, const tag_entry 
         return false;
     }
 }
-bool reader::tag_manager::strip_offsets(reader &r, const tag_entry &e)
+bool reader::tag_manager::strip_offsets(const reader &r, const tag_entry &e, page& p)
 {
     using namespace tr_impl;
 
     if (e.data_field <= 0) return false;
-    r.strip_offsets.resize(e.field_count);
+    p.strip_offsets.resize(e.field_count);
     if (e.field_count >= 2) {
         uint32_t ptr = read_scalar<uint32_t>(r, e);
         info_buffer_lock();
-        r.fread_array_buffering(r.strip_offsets, info_buffer, INFO_BUF_SIZE, ptr);
+        r.fread_array_buffering(p.strip_offsets, info_buffer, INFO_BUF_SIZE, ptr);
         info_buffer_unlock();
     } else {
-        r.strip_offsets[0] = read_scalar<uint32_t>(r, e);
+        p.strip_offsets[0] = read_scalar<uint32_t>(r, e);
     }
     return true;
 }
-bool reader::tag_manager::rows_per_strip(reader &r, const tag_entry &e)
+bool reader::tag_manager::rows_per_strip(const reader &r, const tag_entry &e, page& p)
 {
-    r.rows_per_strip = read_scalar_generic(r, e);
+    p.rows_per_strip = read_scalar_generic(r, e);
     return true;
 }
-bool reader::tag_manager::strip_byte_counts(reader &r, const tag_entry &e)
+bool reader::tag_manager::strip_byte_counts(const reader &r, const tag_entry &e, page& p)
 {
     using namespace tr_impl;
 
     if (e.data_field <= 0) return false;
-    r.strip_byte_counts.resize(e.field_count);
+    p.strip_byte_counts.resize(e.field_count);
     if (e.field_count >= 2) {
         uint32_t ptr = read_scalar<uint32_t>(r, e);
         info_buffer_lock();
-        r.fread_array_buffering(r.strip_byte_counts, info_buffer, INFO_BUF_SIZE, ptr);
+        r.fread_array_buffering(p.strip_byte_counts, info_buffer, INFO_BUF_SIZE, ptr);
         info_buffer_unlock();
     } else {
-        r.strip_byte_counts[0] = read_scalar<uint32_t>(r, e);
+        p.strip_byte_counts[0] = read_scalar<uint32_t>(r, e);
     }
     return true;
 }
-bool reader::tag_manager::x_resolution(reader &r, const tag_entry&)
+bool reader::tag_manager::x_resolution(const reader&, const tag_entry&, page&)
 {
     // Not yet implemented
     return true;
 }
-bool reader::tag_manager::y_resolution(reader &r, const tag_entry&)
+bool reader::tag_manager::y_resolution(const reader&, const tag_entry&, page&)
 {
     // Not yet implemented
     return true;
 }
-bool reader::tag_manager::resolution_unit(reader &r, const tag_entry&)
+bool reader::tag_manager::resolution_unit(const reader&, const tag_entry&, page&)
 {
     // Not yet implemented
     return true;
 }
-bool reader::tag_manager::color_map(reader &r, const tag_entry &e)
+bool reader::tag_manager::color_map(const reader &r, const tag_entry &e, page& p)
 {
     using namespace tr_impl;
 
@@ -364,13 +367,13 @@ bool reader::tag_manager::color_map(reader &r, const tag_entry &e)
     uint32_t ptr = read_scalar<uint32_t>(r, e);
     if (ptr == 0) return false;
 
-    r.color_palette.resize(e.field_count);
+    p.color_palette.resize(e.field_count);
     info_buffer_lock();
-    r.fread_array_buffering(r.color_palette, info_buffer, INFO_BUF_SIZE, ptr);
+    r.fread_array_buffering(p.color_palette, info_buffer, INFO_BUF_SIZE, ptr);
     info_buffer_unlock();
     return true;
 }
-bool reader::tag_manager::image_description(reader &r, const tag_entry &e)
+bool reader::tag_manager::image_description(const reader &r, const tag_entry &e, page& p)
 {
     using namespace tr_impl;
     if (e.field_count <= 0) return true;
@@ -378,7 +381,7 @@ bool reader::tag_manager::image_description(reader &r, const tag_entry &e)
     if (e.field_count <= 4) {
         uint32_t u32_str = read_scalar<uint32_t>(r, e);
         std::string temp_str(reinterpret_cast<char*>(&u32_str), 0, e.field_count-1);
-        r.description.swap(temp_str);
+        p.description.swap(temp_str);
     } else {
         std::vector<uint8_t> temp_vec(e.field_count, 0);
         uint32_t ptr = read_scalar<uint32_t>(r, e);
@@ -386,16 +389,16 @@ bool reader::tag_manager::image_description(reader &r, const tag_entry &e)
         r.fread_array_buffering(temp_vec, info_buffer, INFO_BUF_SIZE, ptr);
         info_buffer_unlock();
         std::string temp_str(temp_vec.begin(), temp_vec.end()-1);
-        r.description.swap(temp_str);
+        p.description.swap(temp_str);
     }
     return true;
 }
-bool reader::tag_manager::samples_per_pixel(reader &r, const tag_entry &e)
+bool reader::tag_manager::samples_per_pixel(const reader &r, const tag_entry &e, page& p)
 {
-    r.sample_per_pixel = read_scalar_generic(r, e);
+    p.sample_per_pixel = read_scalar_generic(r, e);
     return true;
 }
-bool reader::tag_manager::date_time(reader &r, const tag_entry &e)
+bool reader::tag_manager::date_time(const reader &r, const tag_entry &e, page& p)
 {
     using namespace tr_impl;
     if (e.field_count != 20) return false;
@@ -406,13 +409,13 @@ bool reader::tag_manager::date_time(reader &r, const tag_entry &e)
     r.fread_array_buffering(temp_vec, info_buffer, INFO_BUF_SIZE, ptr);
     info_buffer_unlock();
     std::string temp_str(temp_vec.begin(), temp_vec.end()-1);
-    r.date_time.swap(temp_str);
+    p.date_time.swap(temp_str);
     return true;
 }
-bool reader::tag_manager::extra_samples(reader &r, const tag_entry &e)
+bool reader::tag_manager::extra_samples(const reader &r, const tag_entry &e, page& p)
 {
-    r.extra_sample_counts = e.field_count;
-    r.extra_sample_type = static_cast<extra_data_t>(read_scalar<uint16_t>(r, e));
+    p.extra_sample_counts = e.field_count;
+    p.extra_sample_type = static_cast<extra_data_t>(read_scalar<uint16_t>(r, e));
     return true;
 }
 

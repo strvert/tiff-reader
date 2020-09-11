@@ -26,11 +26,11 @@ int main()
             return 0;
         }
 
-        std::cout << std::endl;
-        r.print_header();
-        std::cout << std::endl;
-        r.decode().print_info();
-        std::cout << std::endl;
+        if (r.get_page_count() >= 1) {
+            const tiff::page& p = r.get_page(0);
+            p.print_info();
+        }
+        // r.get_pixel();
     }
 }
 

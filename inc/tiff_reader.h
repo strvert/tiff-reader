@@ -308,17 +308,13 @@ struct rational_t
     uint32_t den;
 };
 
-class reader {
+class page
+{
+public:
+    page(page&&) noexcept = default;
 private:
-    const std::string path;
-    intptr_t source;
-
-    endian_t endi;
-    bool need_swap;
-
-    header h;
-    std::vector<ifd> ifds;
-    bool decoded = false;
+    friend class reader;
+    page() : bit_per_samples({1}), sample_per_pixel(1), extra_sample_counts(0) {}
 
     uint32_t width;
     uint32_t height;
@@ -339,6 +335,23 @@ private:
     std::string description;
     std::string date_time;
 
+public:
+    void print_info() const;
+};
+
+class reader {
+private:
+    const std::string path;
+    intptr_t source;
+
+    endian_t endi;
+    bool need_swap;
+
+    header h;
+    std::vector<ifd> ifds;
+    bool decoded = false;
+
+    std::vector<page> pages;
 
 private:
     reader(const std::string& path);
@@ -358,7 +371,7 @@ private:
     static endian_t check_endian_type(const char s[2]);
     size_t fread_pos(void* dest, const size_t pos, const size_t size) const;
     template<typename T>
-    void fread_array_buffering(std::vector<T>& vec, const size_t count, void* buffer, const size_t bufsize, const size_t pos)
+    void fread_array_buffering(std::vector<T>& vec, const size_t count, void* buffer, const size_t bufsize, const size_t pos) const
     {
         buffer_reader rd(buffer, need_swap);
         uint32_t total = count * sizeof(T);
@@ -374,10 +387,11 @@ private:
     }
 
     template<typename T>
-    void fread_array_buffering(std::vector<T>& vec, void* buffer, const size_t bufsize, const size_t pos)
+    void fread_array_buffering(std::vector<T>& vec, void* buffer, const size_t bufsize, const size_t pos) const
     {
         fread_array_buffering(vec, vec.size(), buffer, bufsize, pos);
     }
+    void decode();
 
 public:
     ~reader();
@@ -387,20 +401,20 @@ public:
     bool is_big_endian() const;
     bool is_little_endian() const;
     void fetch_ifds(std::vector<ifd> &ifds) const;
-    bool read_entry_tags(const std::vector<ifd> &ifds);
-    reader& decode();
+    bool read_entry_tags(const std::vector<ifd> &ifds, std::vector<page> &pages);
+    const page& get_page(uint32_t index) const;
+    uint32_t get_page_count() const;
 
     void print_header() const;
-    void print_info() const;
 
 public:
-    const static std::map<tag_t, std::function<bool(reader&, const tag_entry&)>> tag_procs;
+    const static std::map<tag_t, std::function<bool(const reader&, const tag_entry&, page&)>> tag_procs;
 
 private:
     struct tag_manager
     {
         template<typename T>
-        static T read_scalar(const reader& r, const tag_entry &e)
+        static T read_scalar(const reader& r, const tag_entry& e)
         {
             if (r.need_swap) {
                 return e.data_field >> ((sizeof(e.data_field) - sizeof(T)) * 8);
@@ -426,22 +440,22 @@ private:
             return 0;
         }
 
-        static bool image_width(reader&, const tag_entry&);
-        static bool image_length(reader&, const tag_entry&);
-        static bool bits_per_sample(reader&, const tag_entry&);
-        static bool compression(reader&, const tag_entry&);
-        static bool photometric_interpretation(reader&, const tag_entry&);
-        static bool strip_offsets(reader&, const tag_entry&);
-        static bool rows_per_strip(reader&, const tag_entry&);
-        static bool strip_byte_counts(reader&, const tag_entry&);
-        static bool x_resolution(reader&, const tag_entry&);
-        static bool y_resolution(reader&, const tag_entry&);
-        static bool resolution_unit(reader&, const tag_entry&);
-        static bool color_map(reader&, const tag_entry&);
-        static bool image_description(reader&, const tag_entry&);
-        static bool samples_per_pixel(reader&, const tag_entry&);
-        static bool date_time(reader&, const tag_entry&);
-        static bool extra_samples(reader&, const tag_entry&);
+        static bool image_width(const reader&, const tag_entry&, page&);
+        static bool image_length(const reader&, const tag_entry&, page&);
+        static bool bits_per_sample(const reader&, const tag_entry&, page&);
+        static bool compression(const reader&, const tag_entry&, page&);
+        static bool photometric_interpretation(const reader&, const tag_entry&, page&);
+        static bool strip_offsets(const reader&, const tag_entry&, page&);
+        static bool rows_per_strip(const reader&, const tag_entry&, page&);
+        static bool strip_byte_counts(const reader&, const tag_entry&, page&);
+        static bool x_resolution(const reader&, const tag_entry&, page&);
+        static bool y_resolution(const reader&, const tag_entry&, page&);
+        static bool resolution_unit(const reader&, const tag_entry&, page&);
+        static bool color_map(const reader&, const tag_entry&, page&);
+        static bool image_description(const reader&, const tag_entry&, page&);
+        static bool samples_per_pixel(const reader&, const tag_entry&, page&);
+        static bool date_time(const reader&, const tag_entry&, page&);
+        static bool extra_samples(const reader&, const tag_entry&, page&);
     };
 };
 
