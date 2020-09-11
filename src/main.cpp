@@ -8,13 +8,14 @@ int main()
 {
     std::vector<std::string> imgs;
     // imgs.push_back("./jp.tif");
-    // imgs.push_back("./transparent.tiff");
-    // imgs.push_back("./1MB.tiff");
-    // imgs.push_back("./1MB_be.tiff");
-    imgs.push_back("./le.tif");
-    imgs.push_back("./be.tif");
+    // imgs.push_back("./p_jp.tif");
+    imgs.push_back("./transparent.tiff");
+    // imgs.push_back("./le.tif");
+    // imgs.push_back("./be.tif");
     // imgs.push_back("./high_le.tiff");
     // imgs.push_back("./high_be.tiff");
+    // imgs.push_back("./1MB.tiff");
+    // imgs.push_back("./1MB_be.tiff");
     // imgs.push_back("./gray.tif");
     // imgs.push_back("./gray_be.tiff");
 
@@ -28,7 +29,7 @@ int main()
         std::cout << std::endl;
         r.print_header();
         std::cout << std::endl;
-        r.decode();
+        r.decode().print_info();
         std::cout << std::endl;
     }
 }

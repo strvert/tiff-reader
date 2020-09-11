@@ -2,6 +2,7 @@
 #define __TIFF_READER_H
 
 #include <bits/stdint-uintn.h>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -32,7 +33,7 @@ const char* to_string(T e)
     if (string_map<T>.count(e)) {
         return string_map<T>.at(e);
     }
-    return "";
+    return "UNKNOWN";
 }
 
 class buffer_reader
@@ -108,11 +109,17 @@ public:
     }
 
     template<typename T>
-    void read_array(std::vector<T>& vec, size_t size)
+    void read_array(std::vector<T>& vec, size_t start, size_t size)
     {
-        for (size_t i = 0; i < size; i++){
+        for (size_t i = start; i < start+size; i++){
             read(vec[i]);
         }
+    }
+
+    template<typename T>
+    void read_array(std::vector<T>& vec, size_t size)
+    {
+        read_array(vec, 0, size);
     }
 
     template<typename T>
@@ -238,6 +245,41 @@ const std::map<compression_t, const char*> string_map<compression_t> = {
     {compression_t::PACKBITS,   "PackBits"},
 };
 
+enum class colorspace_t : uint16_t {
+    MINISWHITE  = 0,
+    MINISBLACK  = 1,
+    RGB         = 2,
+    PALETTE     = 3,
+    MASK        = 4,
+    SEPARATED   = 5,
+    YCBCR       = 6,
+};
+
+template<>
+const std::map<colorspace_t, const char*> string_map<colorspace_t> = {
+    {colorspace_t::MINISWHITE, "WhiteIsZero"},
+    {colorspace_t::MINISBLACK, "BlackIsZero"},
+    {colorspace_t::RGB, "RGB"},
+    {colorspace_t::PALETTE, "Palette color"},
+    {colorspace_t::MASK, "Transparency Mask"},
+    {colorspace_t::SEPARATED, "CMYK"},
+    {colorspace_t::YCBCR, "YCbCr"},
+};
+
+enum class extra_data_t : uint16_t
+{
+    UNSPECIFIED = 0,
+    ASSOCALPHA  = 1,
+    UNASSALPHA  = 2,
+};
+
+template<>
+const std::map<extra_data_t, const char*> string_map<extra_data_t> = {
+    {extra_data_t::UNSPECIFIED, "Unspecified data"},
+    {extra_data_t::ASSOCALPHA, "Associated alpha data (pre-multiplied color)"},
+    {extra_data_t::UNASSALPHA, "Unassociated alpha data"},
+};
+
 struct header
 {
     char order[2];
@@ -260,6 +302,12 @@ struct ifd
     uint32_t next_ifd;
 };
 
+struct rational_t
+{
+    uint32_t num;
+    uint32_t den;
+};
+
 class reader {
 private:
     const std::string path;
@@ -275,6 +323,21 @@ private:
     uint32_t width;
     uint32_t height;
     std::vector<uint16_t> bit_per_samples;
+    uint16_t sample_per_pixel;
+    compression_t compression;
+    colorspace_t colorspace;
+    std::vector<uint16_t> color_palette;
+
+    std::vector<uint32_t> strip_offsets;
+    uint32_t rows_per_strip;
+    std::vector<uint32_t> strip_byte_counts;
+    uint32_t extra_sample_counts;
+    extra_data_t extra_sample_type;
+    rational_t x_resolution;
+    rational_t y_resolution;
+
+    std::string description;
+    std::string date_time;
 
 
 private:
@@ -294,6 +357,27 @@ private:
 
     static endian_t check_endian_type(const char s[2]);
     size_t fread_pos(void* dest, const size_t pos, const size_t size) const;
+    template<typename T>
+    void fread_array_buffering(std::vector<T>& vec, const size_t count, void* buffer, const size_t bufsize, const size_t pos)
+    {
+        buffer_reader rd(buffer, need_swap);
+        uint32_t total = count * sizeof(T);
+        uint32_t look = 0;
+        while(total-look > 0) {
+            uint32_t size
+                = std::min(static_cast<uint32_t>((bufsize / sizeof(T))*sizeof(T)), total-look);
+            fread_pos(buffer, pos+look, size);
+            rd.read_array(vec, look/sizeof(T), size/sizeof(T));
+            rd.seek_top();
+            look += size;
+        }
+    }
+
+    template<typename T>
+    void fread_array_buffering(std::vector<T>& vec, void* buffer, const size_t bufsize, const size_t pos)
+    {
+        fread_array_buffering(vec, vec.size(), buffer, bufsize, pos);
+    }
 
 public:
     ~reader();
@@ -324,6 +408,23 @@ private:
                 return e.data_field;
             }
         }
+        static uint32_t read_scalar_generic(const reader& r, const tag_entry &e)
+        {
+            switch (e.field_type) {
+                case data_t::BYTE:
+                    return read_scalar<uint8_t>(r, e);
+                    break;
+                case data_t::SHORT:
+                    return read_scalar<uint16_t>(r, e);
+                    break;
+                case data_t::LONG:
+                    return read_scalar<uint32_t>(r, e);
+                    break;
+                default:
+                    break;
+            }
+            return 0;
+        }
 
         static bool image_width(reader&, const tag_entry&);
         static bool image_length(reader&, const tag_entry&);
@@ -343,7 +444,6 @@ private:
         static bool extra_samples(reader&, const tag_entry&);
     };
 };
-
 
 }
 

@@ -1,8 +1,10 @@
 #include "tiff_reader.h"
 #include <bits/stdint-uintn.h>
 #include <bitset>
+#include <cstddef>
 #include <cstring>
 #include <algorithm>
+#include <ostream>
 #include <vector>
 #include <type_traits>
 
@@ -12,7 +14,7 @@
 namespace tiff {
 
 namespace tr_impl {
-    constexpr const uint32_t INFO_BUF_SIZE = 16;
+    constexpr const uint32_t INFO_BUF_SIZE = 32;
     constexpr const uint32_t PIX_BUF_SIZE = 128;
     static uint8_t info_buffer[INFO_BUF_SIZE];
     static uint8_t pix_buffer[PIX_BUF_SIZE];
@@ -65,7 +67,8 @@ const std::map<tag_t, std::function<bool(reader&, const tag_entry&)>> reader::ta
     {tag_t::EXTRA_SAMPLES, tag_manager::extra_samples},
 };
 
-reader::reader(const std::string& path) : path(path), bit_per_samples({1})
+reader::reader(const std::string& path)
+    : path(path), bit_per_samples({1}), sample_per_pixel(1)
 {
     using namespace tr_impl;
     source = fopen(path.c_str(), "rb");
@@ -179,10 +182,12 @@ bool reader::read_entry_tags(const std::vector<ifd> &ifds)
     for(auto& e: ifds[0].entries) {
         if (tag_procs.count(e.tag)) {
             if(!tag_procs.at(e.tag)(*this, e)) {
+                printf("Tag %s(", to_string(e.tag));
+                printf("0x%04X) process failed.\n", enum_base_cast(e.tag));
                 return false;
             }
         } else {
-            printf("Tags id: 0x%04x is not implemented.\n", enum_base_cast(e.tag));
+            // printf("Tags id: 0x%04X is not implemented.\n", enum_base_cast(e.tag));
         }
     }
     return true;
@@ -209,58 +214,53 @@ void reader::print_header() const
 void reader::print_info() const
 {
     if (!decoded) {
-        printf("You must first call decode()\n");
+        printf("Decoding is not complete.\n");
         return;
     }
 
-    for(auto& e: ifds[0].entries) {
-        printf("tag: %s(0x%04x)\n", to_string(e.tag), enum_base_cast(e.tag));
-        printf("field type: %s\n", to_string(e.field_type));
-        printf("field count: %d\n", e.field_count);
-        printf("data field: 0x%04x\n", e.data_field);
-        printf("\n");
+    // for(auto& e: ifds[0].entries) {
+    //     printf("tag: %s(0x%04x)\n", to_string(e.tag), enum_base_cast(e.tag));
+    //     printf("field type: %s\n", to_string(e.field_type));
+    //     printf("field count: %d\n", e.field_count);
+    //     printf("data field: 0x%04x\n", e.data_field);
+    //     printf("\n");
+    // }
+
+    // The output infomation based on tiffinfo.
+    printf("Image Width: %d Image Height: %d\n", width, height);
+    printf("Bits/Sample: ");
+    for (auto& bps: bit_per_samples) {
+        printf("%d ", bps);
+    }
+    printf("\n");
+    printf("Compression Scheme: %s\n", to_string(compression));
+    printf("Photometric Interpretation: %s\n", to_string(colorspace));
+    printf("%ld Strips:\n", strip_offsets.size());
+    for (int i = 0; i < strip_offsets.size(); i++) {
+        printf("\t%d: [%10d]\n", i, strip_offsets[i]);
     }
 }
 
 bool reader::tag_manager::image_width(reader &r, const tag_entry &e)
 {
-    switch (e.field_type) {
-        case data_t::SHORT:
-            r.width = read_scalar<uint16_t>(r, e);
-            break;
-        case data_t::LONG:
-            r.width = read_scalar<uint32_t>(r, e);
-            break;
-        default:
-            break;
-    }
+    r.width = read_scalar_generic(r, e);
     return true;
 }
 bool reader::tag_manager::image_length(reader &r, const tag_entry &e)
 {
-    switch (e.field_type) {
-        case data_t::SHORT:
-            r.height = read_scalar<uint16_t>(r, e);
-            break;
-        case data_t::LONG:
-            r.height = read_scalar<uint32_t>(r, e);
-            break;
-        default:
-            break;
-    }
+    r.height = read_scalar_generic(r, e);
     return true;
 }
 bool reader::tag_manager::bits_per_sample(reader &r, const tag_entry &e)
 {
     using namespace tr_impl;
 
+    if (e.data_field <= 0) return false;
     r.bit_per_samples.resize(e.field_count);
     if (e.field_count * sizeof(uint16_t) > sizeof(uint32_t)) {
-        size_t ptr = read_scalar<uint32_t>(r, e);
+        uint32_t ptr = read_scalar<uint32_t>(r, e);
         info_buffer_lock();
-        r.fread_pos(info_buffer, ptr, e.field_count * sizeof(uint16_t));
-        buffer_reader rd(info_buffer, r.need_swap);
-        rd.read_array(r.bit_per_samples);
+        r.fread_array_buffering(r.bit_per_samples, info_buffer, INFO_BUF_SIZE, ptr);
         info_buffer_unlock();
     } else {
         r.bit_per_samples[0] = read_scalar<uint16_t>(r, e);
@@ -269,56 +269,143 @@ bool reader::tag_manager::bits_per_sample(reader &r, const tag_entry &e)
 }
 bool reader::tag_manager::compression(reader &r, const tag_entry &e)
 {
-    std::cout << __FUNCTION__ << std::endl;
-    std::cout << read_scalar<uint16_t>(r, e) << std::endl;
+    auto c = static_cast<compression_t>(read_scalar<uint16_t>(r, e));
+    if (c != compression_t::NONE) {
+        printf("Compressed tiff is not supported.\n");
+        return false;
+    }
+    r.compression = c;
     return true;
 }
-bool reader::tag_manager::photometric_interpretation(reader &r, const tag_entry&)
+bool reader::tag_manager::photometric_interpretation(reader &r, const tag_entry &e)
 {
+    r.colorspace = static_cast<colorspace_t>(read_scalar<uint16_t>(r, e));
+    if (r.colorspace == colorspace_t::MINISBLACK);
+    switch (r.colorspace) {
+    case colorspace_t::MINISBLACK:
+    case colorspace_t::MINISWHITE:
+    case colorspace_t::RGB:
+    case colorspace_t::PALETTE:
+    case colorspace_t::MASK:
+        return true;
+    default:
+        printf("Specified color space is not available.\n");
+        return false;
+    }
+}
+bool reader::tag_manager::strip_offsets(reader &r, const tag_entry &e)
+{
+    using namespace tr_impl;
+
+    if (e.data_field <= 0) return false;
+    r.strip_offsets.resize(e.field_count);
+    if (e.field_count >= 2) {
+        uint32_t ptr = read_scalar<uint32_t>(r, e);
+        info_buffer_lock();
+        r.fread_array_buffering(r.strip_offsets, info_buffer, INFO_BUF_SIZE, ptr);
+        info_buffer_unlock();
+    } else {
+        r.strip_offsets[0] = read_scalar<uint32_t>(r, e);
+    }
     return true;
 }
-bool reader::tag_manager::strip_offsets(reader &r, const tag_entry&)
+bool reader::tag_manager::rows_per_strip(reader &r, const tag_entry &e)
 {
+    r.rows_per_strip = read_scalar_generic(r, e);
     return true;
 }
-bool reader::tag_manager::rows_per_strip(reader &r, const tag_entry&)
+bool reader::tag_manager::strip_byte_counts(reader &r, const tag_entry &e)
 {
-    return true;
-}
-bool reader::tag_manager::strip_byte_counts(reader &r, const tag_entry&)
-{
+    using namespace tr_impl;
+
+    if (e.data_field <= 0) return false;
+    r.strip_byte_counts.resize(e.field_count);
+    if (e.field_count >= 2) {
+        uint32_t ptr = read_scalar<uint32_t>(r, e);
+        info_buffer_lock();
+        r.fread_array_buffering(r.strip_byte_counts, info_buffer, INFO_BUF_SIZE, ptr);
+        info_buffer_unlock();
+    } else {
+        r.strip_byte_counts[0] = read_scalar<uint32_t>(r, e);
+    }
     return true;
 }
 bool reader::tag_manager::x_resolution(reader &r, const tag_entry&)
 {
+    // Not yet implemented
     return true;
 }
 bool reader::tag_manager::y_resolution(reader &r, const tag_entry&)
 {
+    // Not yet implemented
     return true;
 }
 bool reader::tag_manager::resolution_unit(reader &r, const tag_entry&)
 {
+    // Not yet implemented
     return true;
 }
-bool reader::tag_manager::color_map(reader &r, const tag_entry&)
+bool reader::tag_manager::color_map(reader &r, const tag_entry &e)
 {
+    using namespace tr_impl;
+
+    if (e.field_count <= 0) return true;
+
+    uint32_t ptr = read_scalar<uint32_t>(r, e);
+    if (ptr == 0) return false;
+
+    r.color_palette.resize(e.field_count);
+    info_buffer_lock();
+    r.fread_array_buffering(r.color_palette, info_buffer, INFO_BUF_SIZE, ptr);
+    info_buffer_unlock();
     return true;
 }
-bool reader::tag_manager::image_description(reader &r, const tag_entry&)
+bool reader::tag_manager::image_description(reader &r, const tag_entry &e)
 {
+    using namespace tr_impl;
+    if (e.field_count <= 0) return true;
+
+    if (e.field_count <= 4) {
+        uint32_t u32_str = read_scalar<uint32_t>(r, e);
+        std::string temp_str(reinterpret_cast<char*>(&u32_str), 0, e.field_count-1);
+        r.description.swap(temp_str);
+    } else {
+        std::vector<uint8_t> temp_vec(e.field_count, 0);
+        uint32_t ptr = read_scalar<uint32_t>(r, e);
+        info_buffer_lock();
+        r.fread_array_buffering(temp_vec, info_buffer, INFO_BUF_SIZE, ptr);
+        info_buffer_unlock();
+        std::string temp_str(temp_vec.begin(), temp_vec.end()-1);
+        r.description.swap(temp_str);
+    }
     return true;
 }
-bool reader::tag_manager::samples_per_pixel(reader &r, const tag_entry&)
+bool reader::tag_manager::samples_per_pixel(reader &r, const tag_entry &e)
 {
+    r.sample_per_pixel = read_scalar_generic(r, e);
     return true;
 }
-bool reader::tag_manager::date_time(reader &r, const tag_entry&)
+bool reader::tag_manager::date_time(reader &r, const tag_entry &e)
 {
+    using namespace tr_impl;
+    if (e.field_count != 20) return false;
+
+    std::vector<uint8_t> temp_vec(20, 0);
+    uint32_t ptr = read_scalar<uint32_t>(r, e);
+    info_buffer_lock();
+    r.fread_array_buffering(temp_vec, info_buffer, INFO_BUF_SIZE, ptr);
+    info_buffer_unlock();
+    std::string temp_str(temp_vec.begin(), temp_vec.end()-1);
+    r.date_time.swap(temp_str);
     return true;
 }
-bool reader::tag_manager::extra_samples(reader &r, const tag_entry&)
+bool reader::tag_manager::extra_samples(reader &r, const tag_entry &e)
 {
+    std::cout << "extra_samples" << std::endl;
+    r.extra_sample_counts = e.field_count;
+    r.extra_sample_type = static_cast<extra_data_t>(read_scalar<uint16_t>(r, e));
+
+    std::cout << r.extra_sample_counts << ":" << to_string(r.extra_sample_type) << std::endl;
     return true;
 }
 
