@@ -67,8 +67,9 @@ const std::map<tag_t, std::function<bool(reader&, const tag_entry&)>> reader::ta
     {tag_t::EXTRA_SAMPLES, tag_manager::extra_samples},
 };
 
-reader::reader(const std::string& path)
-    : path(path), bit_per_samples({1}), sample_per_pixel(1)
+reader::reader(const std::string& path) :
+    path(path), bit_per_samples({1}), sample_per_pixel(1),
+    extra_sample_counts(0)
 {
     using namespace tr_impl;
     source = fopen(path.c_str(), "rb");
@@ -239,6 +240,15 @@ void reader::print_info() const
     for (int i = 0; i < strip_offsets.size(); i++) {
         printf("\t%d: [%10d]\n", i, strip_offsets[i]);
     }
+    printf("Samples/Pixel: %d\n", sample_per_pixel);
+    printf("Rows/Strip: %d\n", rows_per_strip);
+    printf("Extra Samples: %d <%s>\n", extra_sample_counts, to_string(extra_sample_type));
+    if (description.length() != 0) {
+        printf("Description: %s\n", description.c_str());
+    }
+    if (date_time.length() != 0) {
+        printf("Date Time: %s\n", date_time.c_str());
+    }
 }
 
 bool reader::tag_manager::image_width(reader &r, const tag_entry &e)
@@ -401,11 +411,8 @@ bool reader::tag_manager::date_time(reader &r, const tag_entry &e)
 }
 bool reader::tag_manager::extra_samples(reader &r, const tag_entry &e)
 {
-    std::cout << "extra_samples" << std::endl;
     r.extra_sample_counts = e.field_count;
     r.extra_sample_type = static_cast<extra_data_t>(read_scalar<uint16_t>(r, e));
-
-    std::cout << r.extra_sample_counts << ":" << to_string(r.extra_sample_type) << std::endl;
     return true;
 }
 

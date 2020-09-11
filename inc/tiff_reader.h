@@ -275,9 +275,9 @@ enum class extra_data_t : uint16_t
 
 template<>
 const std::map<extra_data_t, const char*> string_map<extra_data_t> = {
-    {extra_data_t::UNSPECIFIED, "Unspecified data"},
-    {extra_data_t::ASSOCALPHA, "Associated alpha data (pre-multiplied color)"},
-    {extra_data_t::UNASSALPHA, "Unassociated alpha data"},
+    {extra_data_t::UNSPECIFIED, "Unspecified"},
+    {extra_data_t::ASSOCALPHA, "Associated alpha (pre-multiplied aplha)"},
+    {extra_data_t::UNASSALPHA, "Unassociated alpha"},
 };
 
 struct header
