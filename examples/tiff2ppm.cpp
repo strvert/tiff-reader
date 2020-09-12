@@ -7,26 +7,18 @@
 
 #include "tiff_reader.h"
 
-int main()
+int main(int argc, char** argv)
 {
-    std::vector<std::string> imgs = {
-        // "./jp.tif",
-        // "./p_jp.tif",
-        // "./transparent.tiff",
-        // "./be.tif",
-        // "./high_le.tiff",
-        // "./high_be.tiff",
-        // "./1MB.tiff",
-        // "./1MB_be.tiff",
-        "./gray.tif",
-        // "./gray_be.tiff",
-    };
+    std::vector<std::string> imgs;
+    for (int i = 1; i < argc; i++) {
+        imgs.emplace_back(argv[i]);
+    }
 
 
     for (auto& i: imgs) {
         auto r = tiff::reader::open(i);
         if (!r.is_valid()) {
-            std::cout << "ひらけなかったよ" << std::endl;
+            std::cout << "Failed to open \"" << i << "\"" << std::endl;
             continue;
         }
 

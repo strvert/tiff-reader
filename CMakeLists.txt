@@ -13,15 +13,15 @@ add_custom_target(exec
 
 add_custom_target(copy_compile_commands ALL
     COMMAND cp ${CMAKE_BINARY_DIR}/compile_commands.json ${CMAKE_SOURCE_DIR}
-    DEPENDS ${CMAKE_PROJECT_NAME}
+    # DEPENDS tiff2ppm
     )
 
-add_executable(${CMAKE_PROJECT_NAME}
-    src/main.cpp
+add_executable(tiff2ppm
+    examples/tiff2ppm.cpp
     src/tiff_reader.cpp
     )
 
-target_include_directories(${CMAKE_PROJECT_NAME}
+target_include_directories(tiff2ppm
     PRIVATE ./inc
     )
 
