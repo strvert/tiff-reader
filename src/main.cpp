@@ -3,21 +3,25 @@
 #include <fstream>
 #include <string>
 #include <type_traits>
+#include <thread>
+
 #include "tiff_reader.h"
 
 int main()
 {
-    std::vector<std::string> imgs;
-    // imgs.push_back("./jp.tif");
-    // imgs.push_back("./p_jp.tif");
-    // imgs.push_back("./transparent.tiff");
-    imgs.push_back("./be.tif");
-    // imgs.push_back("./high_le.tiff");
-    // imgs.push_back("./high_be.tiff");
-    // imgs.push_back("./1MB.tiff");
-    // imgs.push_back("./1MB_be.tiff");
-    // imgs.push_back("./gray.tif");
-    // imgs.push_back("./gray_be.tiff");
+    std::vector<std::string> imgs = {
+        // "./jp.tif",
+        // "./p_jp.tif",
+        // "./transparent.tiff",
+        // "./be.tif",
+        // "./high_le.tiff",
+        // "./high_be.tiff",
+        // "./1MB.tiff",
+        // "./1MB_be.tiff",
+        "./gray.tif",
+        // "./gray_be.tiff",
+    };
+
 
     for (auto& i: imgs) {
         auto r = tiff::reader::open(i);

@@ -1,15 +1,12 @@
 #include "tiff_reader.h"
 #include <bits/stdint-intn.h>
 #include <bits/stdint-uintn.h>
-#include <bitset>
 #include <cstddef>
 #include <cstring>
 #include <algorithm>
-#include <ostream>
 #include <vector>
 #include <type_traits>
 
-#include <iostream>
 #include <mutex>
 
 namespace tiff {
@@ -141,7 +138,7 @@ reader::reader(const std::string& path) :
     if (!source) {
         return;
     }
-    if(!read_header()) {
+    if (!read_header()) {
         fclose(source);
         source = 0;
         return;
@@ -161,7 +158,7 @@ reader reader::open(const std::string& path)
 
 bool reader::is_valid() const
 {
-    return source;
+    return source && decoded;
 }
 
 bool reader::read_header()
@@ -264,7 +261,7 @@ bool reader::read_entry_tags(const std::vector<ifd> &ifds, std::vector<page> &pa
     return true;
 }
 
-void reader::decode()
+bool reader::decode()
 {
     fetch_ifds(ifds);
     for (auto& i: ifds) {
@@ -272,10 +269,11 @@ void reader::decode()
     }
 
     if(!read_entry_tags(ifds, pages)) {
-        return;
+        return false;
     }
 
     decoded = true;
+    return true;
 }
 
 const page& reader::get_page(uint32_t index) &

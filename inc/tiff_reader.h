@@ -12,9 +12,6 @@
 #include <map>
 #include <byteswap.h>
 
-#include <iostream>
-#include <bitset>
-
 namespace tiff {
 
 template<typename T>
@@ -447,7 +444,7 @@ private:
     {
         fread_array_buffering(vec, vec.size(), buffer, bufsize, pos);
     }
-    void decode();
+    bool decode();
 
 public:
     ~reader();
