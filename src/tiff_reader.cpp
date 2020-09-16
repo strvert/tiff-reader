@@ -42,8 +42,8 @@ void page::print_info() const
     printf("Compression Scheme: %s\n", to_string(compression));
     printf("Photometric Interpretation: %s\n", to_string(colorspace));
     printf("%ld Strips:\n", strip_offsets.size());
-    for (int i = 0; i < strip_offsets.size(); i++) {
-        printf("\t%d: [%10d, %10d]\n", i, strip_offsets[i], strip_byte_counts[i]);
+    for (size_t i = 0; i < strip_offsets.size(); i++) {
+        printf("\t%ld: [%10d, %10d]\n", i, strip_offsets[i], strip_byte_counts[i]);
     }
     printf("Samples/Pixel: %d\n", sample_per_pixel);
     printf("Rows/Strip: %d\n", rows_per_strip);
@@ -58,8 +58,6 @@ void page::print_info() const
 
 color_t page::get_pixel(const uint16_t x, const uint16_t y) const
 {
-    using namespace tiff_pal;
-
     uint32_t ptr = (y*width + x) * byte_per_pixel;
     uint16_t target_strip = 0;
     uint32_t total_byte = 0;
@@ -71,18 +69,18 @@ color_t page::get_pixel(const uint16_t x, const uint16_t y) const
 
     ptr -= total_byte;
 
-    pix_buffer_lock();
-    r.fread_pos(info_buffer, strip_offsets[target_strip] + ptr, byte_per_pixel);
+    tiff_pal::pix_buffer_lock();
+    r.fread_pos(tiff_pal::info_buffer, strip_offsets[target_strip] + ptr, byte_per_pixel);
 
     color_t c;
     uint8_t* c_u8[4] = {&c.r, &c.g, &c.b, &c.a};
     uint8_t i = 0;
     uint8_t start_pos = 0;
     for (auto& b: bit_per_samples) {
-        *c_u8[i++] = extract_memory<uint8_t>(info_buffer, start_pos, b);
+        *c_u8[i++] = extract_memory<uint8_t>(tiff_pal::info_buffer, start_pos, b);
         start_pos += b;
     }
-    pix_buffer_unlock();
+    tiff_pal::pix_buffer_unlock();
 
     return c;
 }
@@ -119,12 +117,10 @@ bool reader::is_valid() const
 
 bool reader::read_header()
 {
-    using namespace tiff_pal;
-
-    info_buffer_lock();
-    fread_pos(info_buffer, 0, 8);
+    tiff_pal::info_buffer_lock();
+    fread_pos(tiff_pal::info_buffer, 0, 8);
     {
-        buffer_reader r(info_buffer);
+        buffer_reader r(tiff_pal::info_buffer);
         r.read_array(h.order);
         endian_t t = check_endian_type(h.order);
         if (t == endian_t::INVALID) return false;
@@ -134,7 +130,7 @@ bool reader::read_header()
         r.read(h.version);
         r.read(h.offset);
     }
-    info_buffer_unlock();
+    tiff_pal::info_buffer_unlock();
 
     if (h.version != 42) return false;
     return true;
@@ -153,9 +149,8 @@ endian_t reader::check_endian_type(const char* const s)
 
 size_t reader::fread_pos(void* dest, const size_t pos, const size_t size) const
 {
-    using namespace tiff_pal;
-    fseek(source, pos, SEEK_SET);
-    fread(reinterpret_cast<uint8_t*>(dest), size, 1, source);
+    tiff_pal::fseek(source, pos, SEEK_SET);
+    tiff_pal::fread(reinterpret_cast<uint8_t*>(dest), size, 1, source);
     return size;
 }
 
@@ -171,30 +166,29 @@ bool reader::is_little_endian() const
 
 void reader::fetch_ifds(std::vector<ifd> &ifds) const
 {
-    using namespace tiff_pal;
 
-    info_buffer_lock();
+    tiff_pal::info_buffer_lock();
 
     // TODO: In rare cases, there may be more multiple IFD.
     ifds.resize(1);
-    buffer_reader r(info_buffer, need_swap);
-    fread_pos(info_buffer, h.offset, sizeof(ifd::entry_count));
+    buffer_reader r(tiff_pal::info_buffer, need_swap);
+    fread_pos(tiff_pal::info_buffer, h.offset, sizeof(ifd::entry_count));
     r.read(ifds[0].entry_count);
     ifds[0].entries.resize(ifds[0].entry_count);
 
     size_t e_size = 12;
     for (int i = 0; i < ifds[0].entry_count; i++) {
-        fread_pos(info_buffer, h.offset + 2 + i * e_size, e_size);
+        fread_pos(tiff_pal::info_buffer, h.offset + 2 + i * e_size, e_size);
         r.seek_top();
         r.read(ifds[0].entries[i].tag);
         r.read(ifds[0].entries[i].field_type);
         r.read(ifds[0].entries[i].field_count);
         r.read(ifds[0].entries[i].data_field);
     }
-    fread_pos(info_buffer, h.offset, sizeof(ifd::next_ifd));
+    fread_pos(tiff_pal::info_buffer, h.offset, sizeof(ifd::next_ifd));
     r.read(ifds[0].next_ifd);
 
-    info_buffer_unlock();
+    tiff_pal::info_buffer_unlock();
 }
 
 bool reader::read_entry_tags(const std::vector<ifd> &ifds, std::vector<page> &pages)
@@ -220,7 +214,7 @@ bool reader::read_entry_tags(const std::vector<ifd> &ifds, std::vector<page> &pa
 bool reader::decode()
 {
     fetch_ifds(ifds);
-    for (auto& i: ifds) {
+    for (size_t i = 0; i < ifds.size(); i++) {
         pages.push_back(page(*this));
     }
 
@@ -262,15 +256,13 @@ bool reader::tag_manager::image_length(const reader &r, const tag_entry &e, page
 }
 bool reader::tag_manager::bits_per_sample(const reader &r, const tag_entry &e, page& p)
 {
-    using namespace tiff_pal;
-
     if (e.data_field <= 0) return false;
     if (e.field_count * sizeof(uint16_t) > sizeof(uint32_t)) {
         p.bit_per_samples.resize(e.field_count);
         uint32_t ptr = read_scalar<uint32_t>(r, e);
-        info_buffer_lock();
-        r.fread_array_buffering(p.bit_per_samples, info_buffer, INFO_BUF_SIZE, ptr);
-        info_buffer_unlock();
+        tiff_pal::info_buffer_lock();
+        r.fread_array_buffering(p.bit_per_samples, tiff_pal::info_buffer, tiff_pal::INFO_BUF_SIZE, ptr);
+        tiff_pal::info_buffer_unlock();
     } else {
         p.bit_per_samples.resize(1);
         p.bit_per_samples[0] = read_scalar<uint16_t>(r, e);
@@ -297,7 +289,6 @@ bool reader::tag_manager::compression(const reader &r, const tag_entry &e, page&
 bool reader::tag_manager::photometric_interpretation(const reader &r, const tag_entry &e, page& p)
 {
     p.colorspace = static_cast<colorspace_t>(read_scalar<uint16_t>(r, e));
-    if (p.colorspace == colorspace_t::MINISBLACK);
     switch (p.colorspace) {
     case colorspace_t::MINISBLACK:
     case colorspace_t::MINISWHITE:
@@ -312,15 +303,13 @@ bool reader::tag_manager::photometric_interpretation(const reader &r, const tag_
 }
 bool reader::tag_manager::strip_offsets(const reader &r, const tag_entry &e, page& p)
 {
-    using namespace tiff_pal;
-
     if (e.data_field <= 0) return false;
     p.strip_offsets.resize(e.field_count);
     if (e.field_count >= 2) {
         uint32_t ptr = read_scalar<uint32_t>(r, e);
-        info_buffer_lock();
-        r.fread_array_buffering(p.strip_offsets, info_buffer, INFO_BUF_SIZE, ptr);
-        info_buffer_unlock();
+        tiff_pal::info_buffer_lock();
+        r.fread_array_buffering(p.strip_offsets, tiff_pal::info_buffer, tiff_pal::INFO_BUF_SIZE, ptr);
+        tiff_pal::info_buffer_unlock();
     } else {
         p.strip_offsets[0] = read_scalar<uint32_t>(r, e);
     }
@@ -333,15 +322,13 @@ bool reader::tag_manager::rows_per_strip(const reader &r, const tag_entry &e, pa
 }
 bool reader::tag_manager::strip_byte_counts(const reader &r, const tag_entry &e, page& p)
 {
-    using namespace tiff_pal;
-
     if (e.data_field <= 0) return false;
     p.strip_byte_counts.resize(e.field_count);
     if (e.field_count >= 2) {
         uint32_t ptr = read_scalar<uint32_t>(r, e);
-        info_buffer_lock();
-        r.fread_array_buffering(p.strip_byte_counts, info_buffer, INFO_BUF_SIZE, ptr);
-        info_buffer_unlock();
+        tiff_pal::info_buffer_lock();
+        r.fread_array_buffering(p.strip_byte_counts, tiff_pal::info_buffer, tiff_pal::INFO_BUF_SIZE, ptr);
+        tiff_pal::info_buffer_unlock();
     } else {
         p.strip_byte_counts[0] = read_scalar<uint32_t>(r, e);
     }
@@ -370,22 +357,19 @@ bool reader::tag_manager::resolution_unit(const reader&, const tag_entry&, page&
 }
 bool reader::tag_manager::color_map(const reader &r, const tag_entry &e, page& p)
 {
-    using namespace tiff_pal;
-
     if (e.field_count <= 0) return true;
 
     uint32_t ptr = read_scalar<uint32_t>(r, e);
     if (ptr == 0) return false;
 
     p.color_palette.resize(e.field_count);
-    info_buffer_lock();
-    r.fread_array_buffering(p.color_palette, info_buffer, INFO_BUF_SIZE, ptr);
-    info_buffer_unlock();
+    tiff_pal::info_buffer_lock();
+    r.fread_array_buffering(p.color_palette, tiff_pal::info_buffer, tiff_pal::INFO_BUF_SIZE, ptr);
+    tiff_pal::info_buffer_unlock();
     return true;
 }
 bool reader::tag_manager::image_description(const reader &r, const tag_entry &e, page& p)
 {
-    using namespace tiff_pal;
     if (e.field_count <= 0) return true;
 
     if (e.field_count <= 4) {
@@ -395,9 +379,9 @@ bool reader::tag_manager::image_description(const reader &r, const tag_entry &e,
     } else {
         std::vector<uint8_t> temp_vec(e.field_count, 0);
         uint32_t ptr = read_scalar<uint32_t>(r, e);
-        info_buffer_lock();
-        r.fread_array_buffering(temp_vec, info_buffer, INFO_BUF_SIZE, ptr);
-        info_buffer_unlock();
+        tiff_pal::info_buffer_lock();
+        r.fread_array_buffering(temp_vec, tiff_pal::info_buffer, tiff_pal::INFO_BUF_SIZE, ptr);
+        tiff_pal::info_buffer_unlock();
         std::string temp_str(temp_vec.begin(), temp_vec.end()-1);
         p.description.swap(temp_str);
     }
@@ -410,14 +394,13 @@ bool reader::tag_manager::samples_per_pixel(const reader &r, const tag_entry &e,
 }
 bool reader::tag_manager::date_time(const reader &r, const tag_entry &e, page& p)
 {
-    using namespace tiff_pal;
     if (e.field_count != 20) return false;
 
     std::vector<uint8_t> temp_vec(20, 0);
     uint32_t ptr = read_scalar<uint32_t>(r, e);
-    info_buffer_lock();
-    r.fread_array_buffering(temp_vec, info_buffer, INFO_BUF_SIZE, ptr);
-    info_buffer_unlock();
+    tiff_pal::info_buffer_lock();
+    r.fread_array_buffering(temp_vec, tiff_pal::info_buffer, tiff_pal::INFO_BUF_SIZE, ptr);
+    tiff_pal::info_buffer_unlock();
     std::string temp_str(temp_vec.begin(), temp_vec.end()-1);
     p.date_time.swap(temp_str);
     return true;
