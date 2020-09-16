@@ -1,7 +1,6 @@
 #ifndef __TIFF_READER_H
 #define __TIFF_READER_H
 
-#include <bits/stdint-uintn.h>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>

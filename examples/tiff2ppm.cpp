@@ -33,8 +33,8 @@ int main(int argc, char** argv)
         of << "P3" << std::endl;
         of << p.width << " " << p.height << std::endl;
         of << "255" << std::endl;
-        for (int h = 0; h < p.height; h++) {
-            for (int w = 0; w < p.width; w++) {
+        for (size_t h = 0; h < p.height; h++) {
+            for (size_t w = 0; w < p.width; w++) {
                 auto c = p.get_pixel(w, h);
                 of << +c.r << " " << +c.g << " " << +c.b << std::endl;
             }
