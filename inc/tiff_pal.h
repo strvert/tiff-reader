@@ -10,6 +10,8 @@ struct tiff_pal
     static uint8_t info_buffer[INFO_BUF_SIZE];
     static uint8_t pix_buffer[PIX_BUF_SIZE];
 
+    static bool init();
+    static bool deinit();
     static intptr_t fopen(const char* path, const char* mode);
     static int fseek(intptr_t fp, long offset, int origin);
     static int fclose(intptr_t file);

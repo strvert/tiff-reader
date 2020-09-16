@@ -10,6 +10,9 @@ namespace pal_mtx {
     std::mutex pix_buf_mtx;
 }
 
+bool tiff_pal::init() { return true; }
+bool tiff_pal::deinit() { return true; }
+
 intptr_t tiff_pal::fopen(const char* path, const char* mode) {
     return reinterpret_cast<intptr_t>(::fopen(path, mode));
 }
