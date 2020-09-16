@@ -447,6 +447,7 @@ private:
 
 public:
     ~reader();
+    reader(reader&&) = default;
     static reader open(const std::string& path);
 
     bool is_valid() const;
