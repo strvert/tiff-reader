@@ -1,58 +1,15 @@
 #include "tiff_reader.h"
-#include <bits/stdint-intn.h>
-#include <bits/stdint-uintn.h>
+#include "tiff_pal.h"
+#include <cstdint>
 #include <cstddef>
 #include <cstring>
 #include <algorithm>
 #include <vector>
 #include <type_traits>
 
-#include <mutex>
-
 namespace tiff {
 
-namespace tr_impl {
-    constexpr const uint32_t INFO_BUF_SIZE = 32;
-    constexpr const uint32_t PIX_BUF_SIZE = 128;
-    static uint8_t info_buffer[INFO_BUF_SIZE];
-    static uint8_t pix_buffer[PIX_BUF_SIZE];
-    std::mutex info_buf_mtx;
-    std::mutex pix_buf_mtx;
-
-    inline intptr_t fopen(const char* path, const char* mode) {
-        return reinterpret_cast<intptr_t>(::fopen(path, mode));
-    }
-
-    inline int fseek(intptr_t fp, long offset, int origin) {
-        return ::fseek(reinterpret_cast<FILE*>(fp), offset, origin);
-    }
-
-    inline int fclose(intptr_t file) {
-        if (!file) { return EOF; }
-        return ::fclose(reinterpret_cast<FILE*>(file));
-    }
-
-    inline size_t fread(void* buf, size_t size, size_t n, intptr_t fp) {
-        return ::fread(buf, size, n, reinterpret_cast<FILE*>(fp));
-    }
-
-    inline void info_buffer_lock() {
-        info_buf_mtx.lock();
-    }
-
-    inline void info_buffer_unlock() {
-        info_buf_mtx.unlock();
-    }
-
-    inline void pix_buffer_lock() {
-        pix_buf_mtx.lock();
-    }
-
-    inline void pix_buffer_unlock() {
-        pix_buf_mtx.unlock();
-    }
-}
-static_assert(tr_impl::INFO_BUF_SIZE >= 16, "INFO_BUF_SIZE must be at least 16 bytes.");
+static_assert(tiff_pal::INFO_BUF_SIZE >= 16, "INFO_BUF_SIZE must be at least 16 bytes.");
 
 const std::map<tag_t, std::function<bool(const reader&, const tag_entry&, page&)>> reader::tag_procs = {
     {tag_t::IMAGE_WIDTH, tag_manager::image_width},
@@ -101,7 +58,7 @@ void page::print_info() const
 
 color_t page::get_pixel(const uint16_t x, const uint16_t y) const
 {
-    using namespace tr_impl;
+    using namespace tiff_pal;
 
     uint32_t ptr = (y*width + x) * byte_per_pixel;
     uint16_t target_strip = 0;
@@ -133,13 +90,12 @@ color_t page::get_pixel(const uint16_t x, const uint16_t y) const
 reader::reader(const std::string& path) :
     path(path)
 {
-    using namespace tr_impl;
-    source = fopen(path.c_str(), "rb");
+    source = tiff_pal::fopen(path.c_str(), "rb");
     if (!source) {
         return;
     }
     if (!read_header()) {
-        fclose(source);
+        tiff_pal::fclose(source);
         source = 0;
         return;
     }
@@ -148,7 +104,7 @@ reader::reader(const std::string& path) :
 
 reader::~reader()
 {
-    tr_impl::fclose(source);
+    tiff_pal::fclose(source);
 }
 
 reader reader::open(const std::string& path)
@@ -163,7 +119,7 @@ bool reader::is_valid() const
 
 bool reader::read_header()
 {
-    using namespace tr_impl;
+    using namespace tiff_pal;
 
     info_buffer_lock();
     fread_pos(info_buffer, 0, 8);
@@ -197,7 +153,7 @@ endian_t reader::check_endian_type(const char* const s)
 
 size_t reader::fread_pos(void* dest, const size_t pos, const size_t size) const
 {
-    using namespace tr_impl;
+    using namespace tiff_pal;
     fseek(source, pos, SEEK_SET);
     fread(reinterpret_cast<uint8_t*>(dest), size, 1, source);
     return size;
@@ -215,7 +171,7 @@ bool reader::is_little_endian() const
 
 void reader::fetch_ifds(std::vector<ifd> &ifds) const
 {
-    using namespace tr_impl;
+    using namespace tiff_pal;
 
     info_buffer_lock();
 
@@ -306,7 +262,7 @@ bool reader::tag_manager::image_length(const reader &r, const tag_entry &e, page
 }
 bool reader::tag_manager::bits_per_sample(const reader &r, const tag_entry &e, page& p)
 {
-    using namespace tr_impl;
+    using namespace tiff_pal;
 
     if (e.data_field <= 0) return false;
     if (e.field_count * sizeof(uint16_t) > sizeof(uint32_t)) {
@@ -356,7 +312,7 @@ bool reader::tag_manager::photometric_interpretation(const reader &r, const tag_
 }
 bool reader::tag_manager::strip_offsets(const reader &r, const tag_entry &e, page& p)
 {
-    using namespace tr_impl;
+    using namespace tiff_pal;
 
     if (e.data_field <= 0) return false;
     p.strip_offsets.resize(e.field_count);
@@ -377,7 +333,7 @@ bool reader::tag_manager::rows_per_strip(const reader &r, const tag_entry &e, pa
 }
 bool reader::tag_manager::strip_byte_counts(const reader &r, const tag_entry &e, page& p)
 {
-    using namespace tr_impl;
+    using namespace tiff_pal;
 
     if (e.data_field <= 0) return false;
     p.strip_byte_counts.resize(e.field_count);
@@ -414,7 +370,7 @@ bool reader::tag_manager::resolution_unit(const reader&, const tag_entry&, page&
 }
 bool reader::tag_manager::color_map(const reader &r, const tag_entry &e, page& p)
 {
-    using namespace tr_impl;
+    using namespace tiff_pal;
 
     if (e.field_count <= 0) return true;
 
@@ -429,7 +385,7 @@ bool reader::tag_manager::color_map(const reader &r, const tag_entry &e, page& p
 }
 bool reader::tag_manager::image_description(const reader &r, const tag_entry &e, page& p)
 {
-    using namespace tr_impl;
+    using namespace tiff_pal;
     if (e.field_count <= 0) return true;
 
     if (e.field_count <= 4) {
@@ -454,7 +410,7 @@ bool reader::tag_manager::samples_per_pixel(const reader &r, const tag_entry &e,
 }
 bool reader::tag_manager::date_time(const reader &r, const tag_entry &e, page& p)
 {
-    using namespace tr_impl;
+    using namespace tiff_pal;
     if (e.field_count != 20) return false;
 
     std::vector<uint8_t> temp_vec(20, 0);
