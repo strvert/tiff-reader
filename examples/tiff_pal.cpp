@@ -2,8 +2,10 @@
 
 constexpr const uint32_t tiff_pal::INFO_BUF_SIZE;
 constexpr const uint32_t tiff_pal::PIX_BUF_SIZE;
+constexpr const uint32_t tiff_pal::PIX_BUF_COUNT;
 uint8_t tiff_pal::info_buffer[tiff_pal::INFO_BUF_SIZE];
-uint8_t tiff_pal::pix_buffer[tiff_pal::PIX_BUF_SIZE];
+uint8_t tiff_pal::pix_buffer[PIX_BUF_COUNT][PIX_BUF_SIZE];
+tiff_pal::stat tiff_pal::pix_buffer_statics[tiff_pal::PIX_BUF_COUNT];
 
 namespace pal_mtx {
     std::mutex info_buf_mtx;

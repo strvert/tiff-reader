@@ -1,15 +1,16 @@
 #include "tiff_reader.h"
 #include "tiff_pal.h"
+
+#include <bits/stdint-uintn.h>
 #include <cstdint>
 #include <cstddef>
 #include <cstring>
+#include <map>
 #include <algorithm>
 #include <vector>
 #include <type_traits>
 
 namespace tiff {
-
-static_assert(tiff_pal::INFO_BUF_SIZE >= 16, "INFO_BUF_SIZE must be at least 16 bytes.");
 
 const std::map<tag_t, std::function<bool(const reader&, const tag_entry&, page&)>> reader::tag_procs = {
     {tag_t::IMAGE_WIDTH, tag_manager::image_width},
@@ -31,6 +32,103 @@ const std::map<tag_t, std::function<bool(const reader&, const tag_entry&, page&)
     {tag_t::EXTRA_SAMPLES, tag_manager::extra_samples},
 };
 
+template<typename T>
+const std::map<T, const char*> string_map = {};
+
+template<>
+const std::map<data_t, const char*> string_map<data_t>;
+
+template<>
+const std::map<endian_t, const char*> string_map<endian_t> = {
+    {endian_t::INVALID, "INVALID"},
+    {endian_t::BIG,     "BIG"},
+    {endian_t::LITTLE,  "LITTLE"}
+};
+
+template<>
+const std::map<tag_t, const char*> string_map<tag_t> = {
+    {tag_t::NEW_SUBFILE_TYPE,           "New Subfile Type"},
+    {tag_t::IMAGE_WIDTH,                "Image Width"},
+    {tag_t::IMAGE_LENGTH,               "Image Length"},
+    {tag_t::BITS_PER_SAMPLE,            "Bits/Sample"},
+    {tag_t::COMPRESSION,                "Compression"},
+    {tag_t::PHOTOMETRIC_INTERPRETATION, "Photometric Interpretation"},
+    {tag_t::STRIP_OFFSETS,              "Strip Offsets"},
+    {tag_t::ROWS_PER_STRIP,             "Rows/Strip"},
+    {tag_t::STRIP_BYTE_COUNTS,          "Strip Byte Counts"},
+    {tag_t::X_RESOLUTION,               "X Resolution"},
+    {tag_t::Y_RESOLUTION,               "Y Resolution"},
+    {tag_t::PLANAR_CONFIGURATION,       "Planar Configuration"},
+    {tag_t::RESOLUTION_UNIT,            "Resolution Unit"},
+    {tag_t::COLOR_MAP,                  "Color Map"},
+    {tag_t::IMAGE_DESCRIPTION,          "Image Description"},
+    {tag_t::SAMPLES_PER_PIXEL,          "Samples/Pixel"},
+    {tag_t::DATE_TIME,                  "Date Time"},
+    {tag_t::EXTRA_SAMPLES,              "Extra Samples"},
+};
+
+template<>
+const std::map<compression_t, const char*> string_map<compression_t> = {
+    {compression_t::NONE,       "None"},
+    {compression_t::CCITTRLE,   "CCITT modified Huffman RLE"},
+    {compression_t::CCITTFAX3,  "CCITT Group 3 fax encoding"},
+    {compression_t::CCITTFAX4,  "CCITT Group 4 fax encoding"},
+    {compression_t::LZW,        "LZW"},
+    {compression_t::OJPEG,      "JPEG ('old-style' JPEG)"},
+    {compression_t::JPEG,       "JPEG ('new-style' JPEG)"},
+    {compression_t::DEFLATE,    "Deflate ('Adobe-style', 'zip')"}, // zip
+    {compression_t::PACKBITS,   "PackBits"},
+};
+
+template<>
+const std::map<colorspace_t, const char*> string_map<colorspace_t> = {
+    {colorspace_t::MINISWHITE,  "WhiteIsZero"},
+    {colorspace_t::MINISBLACK,  "BlackIsZero"},
+    {colorspace_t::RGB,         "RGB"},
+    {colorspace_t::PALETTE,     "Palette color"},
+    {colorspace_t::MASK,        "Transparency Mask"},
+    {colorspace_t::SEPARATED,   "CMYK"},
+    {colorspace_t::YCBCR,       "YCbCr"},
+};
+
+template<>
+const std::map<extra_data_t, const char*> string_map<extra_data_t> = {
+    {extra_data_t::UNSPECIFIED,     "Unspecified"},
+    {extra_data_t::ASSOCALPHA,      "Associated alpha (pre-multiplied aplha)"},
+    {extra_data_t::UNASSALPHA,      "Unassociated alpha"},
+};
+
+template<>
+const std::map<planar_configuration_t, const char*> string_map<planar_configuration_t> = {
+    {planar_configuration_t::CONTIG,    "Contig"},
+    {planar_configuration_t::SEPARATE,  "Separate"},
+};
+
+template<typename T, std::enable_if_t<std::is_enum<T>::value, std::nullptr_t>>
+const char* to_string(T e)
+{
+    if (string_map<T>.count(e)) {
+        return string_map<T>.at(e);
+    }
+    return "UNKNOWN";
+}
+
+int32_t page::reserve_page_id()
+{
+    for (uint32_t i = 0; i < tiff_pal::PIX_BUF_COUNT; i++) {
+        if (!tiff_pal::pix_buffer_statics[i].in_use) {
+            tiff_pal::pix_buffer_statics[i].in_use = true;
+            return i;
+        }
+    }
+    return -1;
+}
+
+void page::release_page_id(const int32_t id) {
+    if (id >= static_cast<int32_t>(tiff_pal::PIX_BUF_COUNT)) return;
+    tiff_pal::pix_buffer_statics[id].in_use = false;
+}
+
 void page::print_info() const
 {
     printf("Image Width: %d Image Height: %d\n", width, height);
@@ -46,8 +144,8 @@ void page::print_info() const
         printf("\t%ld: [%10d, %10d]\n", i, strip_offsets[i], strip_byte_counts[i]);
     }
     printf("Samples/Pixel: %d\n", sample_per_pixel);
-    printf("Rows/Strip: %d\n", rows_per_strip);
-    printf("Extra Samples: %d <%s>\n", extra_sample_counts, to_string(extra_sample_type));
+    printf("Rows/Strip: %u\n", rows_per_strip);
+    printf("Extra Samples: %u <%s>\n", extra_sample_counts, to_string(extra_sample_type));
     if (description.length() != 0) {
         printf("Description: %s\n", description.c_str());
     }
@@ -57,6 +155,51 @@ void page::print_info() const
 }
 
 color_t page::get_pixel(const uint16_t x, const uint16_t y) const
+{
+    if (buffer_id == -1) return get_pixel_without_buffering(x, y);
+    uint32_t ptr = (y*width + x) * byte_per_pixel;
+    uint16_t target_strip = 0;
+    uint32_t total_byte = 0;
+    for (auto& s: strip_byte_counts) {
+        if (total_byte + s > ptr) break;
+        total_byte += s;
+        target_strip++;
+    }
+
+    ptr -= total_byte;
+
+    size_t read_buffer_pos = 0;
+    tiff_pal::pix_buffer_lock();
+    if (tiff_pal::pix_buffer_statics[buffer_id].strip == target_strip
+            && tiff_pal::pix_buffer_statics[buffer_id].start <= ptr
+            && tiff_pal::pix_buffer_statics[buffer_id].start + tiff_pal::pix_buffer_statics[buffer_id].len > ptr) {
+        read_buffer_pos = ptr - tiff_pal::pix_buffer_statics[buffer_id].start;
+    } else {
+        const size_t remain = strip_byte_counts[target_strip] - ptr;
+        const size_t size = tiff_pal::PIX_BUF_SIZE > remain ? remain : tiff_pal::PIX_BUF_SIZE;
+        r.fread_pos(tiff_pal::pix_buffer[buffer_id], strip_offsets[target_strip] + ptr, size);
+        tiff_pal::pix_buffer_statics[buffer_id].strip = target_strip;
+        tiff_pal::pix_buffer_statics[buffer_id].start = ptr;
+        tiff_pal::pix_buffer_statics[buffer_id].len= size;
+    }
+
+    color_t c;
+    uint8_t* c_u8[4] = {&c.r, &c.g, &c.b, &c.a};
+    uint8_t i = 0;
+    uint8_t start_pos = 0;
+    for (auto& b: bit_per_samples) {
+        *c_u8[i++] = extract_memory<uint8_t>(
+                tiff_pal::pix_buffer[buffer_id] + read_buffer_pos,
+                start_pos,
+                b);
+        start_pos += b;
+    }
+    tiff_pal::pix_buffer_unlock();
+
+    return c;
+}
+
+color_t page::get_pixel_without_buffering(const uint16_t x, const uint16_t y) const
 {
     uint32_t ptr = (y*width + x) * byte_per_pixel;
     uint16_t target_strip = 0;
@@ -69,7 +212,7 @@ color_t page::get_pixel(const uint16_t x, const uint16_t y) const
 
     ptr -= total_byte;
 
-    tiff_pal::pix_buffer_lock();
+    tiff_pal::info_buffer_lock();
     r.fread_pos(tiff_pal::info_buffer, strip_offsets[target_strip] + ptr, byte_per_pixel);
 
     color_t c;
@@ -80,7 +223,7 @@ color_t page::get_pixel(const uint16_t x, const uint16_t y) const
         *c_u8[i++] = extract_memory<uint8_t>(tiff_pal::info_buffer, start_pos, b);
         start_pos += b;
     }
-    tiff_pal::pix_buffer_unlock();
+    tiff_pal::info_buffer_unlock();
 
     return c;
 }
@@ -89,7 +232,7 @@ reader::reader(const std::string& path) :
     path(path)
 {
     source = tiff_pal::fopen(path.c_str(), "rb");
-    if (!source) {
+    if (source <= 0) {
         return;
     }
     if (!read_header()) {
@@ -97,17 +240,26 @@ reader::reader(const std::string& path) :
         source = 0;
         return;
     }
-    decode();
+    if (!decode()) {
+        return;
+    }
 }
 
 reader::~reader()
 {
-    tiff_pal::fclose(source);
+    if (is_valid()) {
+        tiff_pal::fclose(source);
+    }
 }
 
 reader reader::open(const std::string& path)
 {
     return reader(path);
+}
+
+reader *reader::open_ptr(const std::string& path)
+{
+    return new reader(path);
 }
 
 bool reader::is_valid() const
@@ -240,12 +392,11 @@ void reader::print_header() const
 {
     printf("order: %.2s\n", h.order);
     printf("version: %d\n", h.version);
-    printf("offset: %d\n", h.offset);
+    printf("offset: %u\n", h.offset);
 }
 
 bool reader::tag_manager::image_width(const reader &r, const tag_entry &e, page& p)
 {
-    r.print_header();
     p.width = read_scalar_generic(r, e);
     return true;
 }

@@ -1,6 +1,7 @@
 #ifndef __TIFF_READER_H
 #define __TIFF_READER_H
 
+#include <bits/stdint-uintn.h>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -9,7 +10,6 @@
 #include <type_traits>
 #include <vector>
 #include <map>
-#include <byteswap.h>
 
 namespace tiff {
 
@@ -20,17 +20,86 @@ constexpr auto enum_base_cast(T e)
     return static_cast<std::underlying_type_t<T>>(e);
 }
 
-template<typename T>
-const std::map<T, const char*> string_map = {};
+enum class data_t : uint16_t
+{
+    BYTE        = 1,
+    ASCII,
+    SHORT,
+    LONG,
+    RATIONAL,
+    SBYTE,
+    UNDEFINED,
+    SSHORT,
+    SLONG,
+    SRATIONAL,
+    FLOAT,
+    DOUBLE
+};
+
+enum class endian_t : uint8_t {
+    INVALID,
+    BIG,
+    LITTLE
+};
+
+enum class tag_t : uint16_t {
+    NEW_SUBFILE_TYPE            = 0x00FE,
+    IMAGE_WIDTH                 = 0x0100,
+    IMAGE_LENGTH                = 0x0101,
+    BITS_PER_SAMPLE             = 0x0102,
+    COMPRESSION                 = 0x0103,
+    PHOTOMETRIC_INTERPRETATION  = 0x0106,
+    STRIP_OFFSETS               = 0x0111,
+    ROWS_PER_STRIP              = 0x0116,
+    STRIP_BYTE_COUNTS           = 0x0117,
+    X_RESOLUTION                = 0x011A,
+    Y_RESOLUTION                = 0x011B,
+    PLANAR_CONFIGURATION        = 0x011C,
+    RESOLUTION_UNIT             = 0x0128,
+    COLOR_MAP                   = 0x0140,
+    IMAGE_DESCRIPTION           = 0x010E,
+    SAMPLES_PER_PIXEL           = 0x0115,
+    DATE_TIME                   = 0x0132,
+    EXTRA_SAMPLES               = 0x0152,
+};
+
+enum class compression_t : uint16_t {
+    NONE                = 1,
+    CCITTRLE            = 2,
+    CCITTFAX3           = 3,
+    CCITTFAX4           = 4,
+    LZW                 = 5,
+    OJPEG               = 6,
+    JPEG                = 7,
+    DEFLATE             = 8, // zip
+    PACKBITS            = 32773,
+};
+
+enum class colorspace_t : uint16_t {
+    MINISWHITE  = 0,
+    MINISBLACK  = 1,
+    RGB         = 2,
+    PALETTE     = 3,
+    MASK        = 4,
+    SEPARATED   = 5,
+    YCBCR       = 6,
+};
+
+enum class extra_data_t : uint16_t
+{
+    UNSPECIFIED = 0,
+    ASSOCALPHA  = 1,
+    UNASSALPHA  = 2,
+};
+
+enum class planar_configuration_t : uint16_t
+{
+    CONTIG = 1,
+    SEPARATE = 2
+};
 
 template<typename T, std::enable_if_t<std::is_enum<T>::value, std::nullptr_t> = nullptr>
-const char* to_string(T e)
-{
-    if (string_map<T>.count(e)) {
-        return string_map<T>.at(e);
-    }
-    return "UNKNOWN";
-}
+const char* to_string(T e);
 
 class buffer_reader
 {
@@ -130,166 +199,6 @@ public:
     }
 };
 
-enum class data_t : uint16_t
-{
-    BYTE        = 1,
-    ASCII,
-    SHORT,
-    LONG,
-    RATIONAL,
-    SBYTE,
-    UNDEFINED,
-    SSHORT,
-    SLONG,
-    SRATIONAL,
-    FLOAT,
-    DOUBLE
-};
-
-template<>
-const std::map<data_t, const char*> string_map<data_t> = {
-    {data_t::BYTE,          "BYTE"},
-    {data_t::ASCII,         "ASCII"},
-    {data_t::SHORT,         "SHORT"},
-    {data_t::LONG,          "LONG"},
-    {data_t::RATIONAL,      "RATIONAL"},
-    {data_t::SBYTE,         "SBYTE"},
-    {data_t::UNDEFINED,     "UNDEFINED"},
-    {data_t::SSHORT,        "SSHORT"},
-    {data_t::SLONG,         "SLONG"},
-    {data_t::SRATIONAL,     "SRATIONAL"},
-    {data_t::FLOAT,         "FLOAT"},
-    {data_t::DOUBLE,        "DOUBLE"}
-};
-
-enum class endian_t : uint8_t {
-    INVALID,
-    BIG,
-    LITTLE
-};
-
-template<>
-const std::map<endian_t, const char*> string_map<endian_t> = {
-    {endian_t::INVALID, "INVALID"},
-    {endian_t::BIG,     "BIG"},
-    {endian_t::LITTLE,  "LITTLE"}
-};
-
-enum class tag_t : uint16_t {
-    NEW_SUBFILE_TYPE            = 0x00FE,
-    IMAGE_WIDTH                 = 0x0100,
-    IMAGE_LENGTH                = 0x0101,
-    BITS_PER_SAMPLE             = 0x0102,
-    COMPRESSION                 = 0x0103,
-    PHOTOMETRIC_INTERPRETATION  = 0x0106,
-    STRIP_OFFSETS               = 0x0111,
-    ROWS_PER_STRIP              = 0x0116,
-    STRIP_BYTE_COUNTS           = 0x0117,
-    X_RESOLUTION                = 0x011A,
-    Y_RESOLUTION                = 0x011B,
-    PLANAR_CONFIGURATION        = 0x011C,
-    RESOLUTION_UNIT             = 0x0128,
-    COLOR_MAP                   = 0x0140,
-    IMAGE_DESCRIPTION           = 0x010E,
-    SAMPLES_PER_PIXEL           = 0x0115,
-    DATE_TIME                   = 0x0132,
-    EXTRA_SAMPLES               = 0x0152,
-};
-
-template<>
-const std::map<tag_t, const char*> string_map<tag_t> = {
-    {tag_t::NEW_SUBFILE_TYPE,           "New Subfile Type"},
-    {tag_t::IMAGE_WIDTH,                "Image Width"},
-    {tag_t::IMAGE_LENGTH,               "Image Length"},
-    {tag_t::BITS_PER_SAMPLE,            "Bits/Sample"},
-    {tag_t::COMPRESSION,                "Compression"},
-    {tag_t::PHOTOMETRIC_INTERPRETATION, "Photometric Interpretation"},
-    {tag_t::STRIP_OFFSETS,              "Strip Offsets"},
-    {tag_t::ROWS_PER_STRIP,             "Rows/Strip"},
-    {tag_t::STRIP_BYTE_COUNTS,          "Strip Byte Counts"},
-    {tag_t::X_RESOLUTION,               "X Resolution"},
-    {tag_t::Y_RESOLUTION,               "Y Resolution"},
-    {tag_t::PLANAR_CONFIGURATION,       "Planar Configuration"},
-    {tag_t::RESOLUTION_UNIT,            "Resolution Unit"},
-    {tag_t::COLOR_MAP,                  "Color Map"},
-    {tag_t::IMAGE_DESCRIPTION,          "Image Description"},
-    {tag_t::SAMPLES_PER_PIXEL,          "Samples/Pixel"},
-    {tag_t::DATE_TIME,                  "Date Time"},
-    {tag_t::EXTRA_SAMPLES,              "Extra Samples"},
-};
-
-enum class compression_t : uint16_t {
-    NONE                = 1,
-    CCITTRLE            = 2,
-    CCITTFAX3           = 3,
-    CCITTFAX4           = 4,
-    LZW                 = 5,
-    OJPEG               = 6,
-    JPEG                = 7,
-    DEFLATE             = 8, // zip
-    PACKBITS            = 32773,
-};
-
-template<>
-const std::map<compression_t, const char*> string_map<compression_t> = {
-    {compression_t::NONE,       "None"},
-    {compression_t::CCITTRLE,   "CCITT modified Huffman RLE"},
-    {compression_t::CCITTFAX3,  "CCITT Group 3 fax encoding"},
-    {compression_t::CCITTFAX4,  "CCITT Group 4 fax encoding"},
-    {compression_t::LZW,        "LZW"},
-    {compression_t::OJPEG,      "JPEG ('old-style' JPEG)"},
-    {compression_t::JPEG,       "JPEG ('new-style' JPEG)"},
-    {compression_t::DEFLATE,    "Deflate ('Adobe-style', 'zip')"}, // zip
-    {compression_t::PACKBITS,   "PackBits"},
-};
-
-enum class colorspace_t : uint16_t {
-    MINISWHITE  = 0,
-    MINISBLACK  = 1,
-    RGB         = 2,
-    PALETTE     = 3,
-    MASK        = 4,
-    SEPARATED   = 5,
-    YCBCR       = 6,
-};
-
-template<>
-const std::map<colorspace_t, const char*> string_map<colorspace_t> = {
-    {colorspace_t::MINISWHITE,  "WhiteIsZero"},
-    {colorspace_t::MINISBLACK,  "BlackIsZero"},
-    {colorspace_t::RGB,         "RGB"},
-    {colorspace_t::PALETTE,     "Palette color"},
-    {colorspace_t::MASK,        "Transparency Mask"},
-    {colorspace_t::SEPARATED,   "CMYK"},
-    {colorspace_t::YCBCR,       "YCbCr"},
-};
-
-enum class extra_data_t : uint16_t
-{
-    UNSPECIFIED = 0,
-    ASSOCALPHA  = 1,
-    UNASSALPHA  = 2,
-};
-
-template<>
-const std::map<extra_data_t, const char*> string_map<extra_data_t> = {
-    {extra_data_t::UNSPECIFIED,     "Unspecified"},
-    {extra_data_t::ASSOCALPHA,      "Associated alpha (pre-multiplied aplha)"},
-    {extra_data_t::UNASSALPHA,      "Unassociated alpha"},
-};
-
-enum class planar_configuration_t : uint16_t
-{
-    CONTIG = 1,
-    SEPARATE = 2
-};
-
-template<>
-const std::map<planar_configuration_t, const char*> string_map<planar_configuration_t> = {
-    {planar_configuration_t::CONTIG,    "Contig"},
-    {planar_configuration_t::SEPARATE,  "Separate"},
-};
-
 struct header
 {
     char order[2];
@@ -333,13 +242,23 @@ public:
     page(page&&) noexcept = default;
     void print_info() const;
     color_t get_pixel(const uint16_t x, const uint16_t y) const;
+    color_t get_pixel_without_buffering(const uint16_t x, const uint16_t y) const;
 
+    ~page() {
+        if (buffer_id != -1) {
+            release_page_id(buffer_id);
+        }
+    }
 
 private:
     page(const class reader& r) :
-        r(r), bit_per_samples({1}), sample_per_pixel(1), extra_sample_counts(0),
+        r(r), buffer_id(reserve_page_id()),
+        bit_per_samples({1}), sample_per_pixel(1), extra_sample_counts(0),
         planar_configuration(planar_configuration_t::CONTIG)
     {}
+
+    static int reserve_page_id();
+    static void release_page_id(const int id);
 
     template<typename T>
     static T extract_memory(const void* buffer, const uint16_t pos, const uint16_t len_bits)
@@ -368,6 +287,8 @@ private:
     const class reader& r;
 
 public:
+    int32_t buffer_id;
+
     uint32_t width;
     uint32_t height;
     std::vector<uint16_t> bit_per_samples;
@@ -392,6 +313,7 @@ public:
 
 class reader {
     friend color_t page::get_pixel(const uint16_t, const uint16_t) const;
+    friend color_t page::get_pixel_without_buffering(const uint16_t, const uint16_t) const;
 private:
     const std::string path;
     intptr_t source;
@@ -449,6 +371,7 @@ public:
     ~reader();
     reader(reader&&) = default;
     static reader open(const std::string& path);
+    static reader *open_ptr(const std::string& path);
 
     bool is_valid() const;
     bool is_big_endian() const;

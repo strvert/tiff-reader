@@ -5,10 +5,19 @@
 
 struct tiff_pal
 {
+    struct stat {
+        bool in_use = false;
+        size_t strip = 0;
+        size_t start = 0;
+        size_t len = 0;
+    };
+
     constexpr const static uint32_t INFO_BUF_SIZE = 32;
     constexpr const static uint32_t PIX_BUF_SIZE = 128;
+    constexpr const static uint32_t PIX_BUF_COUNT = 5;
     static uint8_t info_buffer[INFO_BUF_SIZE];
-    static uint8_t pix_buffer[PIX_BUF_SIZE];
+    static uint8_t pix_buffer[PIX_BUF_COUNT][PIX_BUF_SIZE];
+    static stat pix_buffer_statics[PIX_BUF_COUNT];
 
     static bool init();
     static bool deinit();
@@ -21,5 +30,7 @@ struct tiff_pal
     static void pix_buffer_lock();
     static void pix_buffer_unlock();
 };
+
+static_assert(tiff_pal::INFO_BUF_SIZE >= 16, "INFO_BUF_SIZE must be at least 16 bytes.");
 
 #endif

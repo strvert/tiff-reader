@@ -1,17 +1,17 @@
 [
 {
-  "directory": "/home/strv/Documents/repo/tiff/build",
-  "command": "/usr/bin/c++ -I.././inc -fpermissive -g3 -O0 -Wall -Wextra -std=gnu++2a -o CMakeFiles/tiff2ppm.dir/examples/tiff2ppm.cpp.o -c /home/strv/Documents/repo/tiff/examples/tiff2ppm.cpp",
-  "file": "/home/strv/Documents/repo/tiff/examples/tiff2ppm.cpp"
+  "directory": "/home/strv/repos/tiff_reader/build",
+  "command": "/usr/bin/c++ -I.././inc -fpermissive -g3 -O0 -Wall -Wextra -std=gnu++2a -o CMakeFiles/tiff2ppm.dir/examples/tiff2ppm.cpp.o -c /home/strv/repos/tiff_reader/examples/tiff2ppm.cpp",
+  "file": "/home/strv/repos/tiff_reader/examples/tiff2ppm.cpp"
 },
 {
-  "directory": "/home/strv/Documents/repo/tiff/build",
-  "command": "/usr/bin/c++ -I.././inc -fpermissive -g3 -O0 -Wall -Wextra -std=gnu++2a -o CMakeFiles/tiff2ppm.dir/src/tiff_reader.cpp.o -c /home/strv/Documents/repo/tiff/src/tiff_reader.cpp",
-  "file": "/home/strv/Documents/repo/tiff/src/tiff_reader.cpp"
+  "directory": "/home/strv/repos/tiff_reader/build",
+  "command": "/usr/bin/c++ -I.././inc -fpermissive -g3 -O0 -Wall -Wextra -std=gnu++2a -o CMakeFiles/tiff2ppm.dir/examples/tiff_pal.cpp.o -c /home/strv/repos/tiff_reader/examples/tiff_pal.cpp",
+  "file": "/home/strv/repos/tiff_reader/examples/tiff_pal.cpp"
 },
 {
-  "directory": "/home/strv/Documents/repo/tiff/build",
-  "command": "/usr/bin/c++ -I.././inc -fpermissive -g3 -O0 -Wall -Wextra -std=gnu++2a -o CMakeFiles/tiff2ppm.dir/src/tiff_pal.cpp.o -c /home/strv/Documents/repo/tiff/src/tiff_pal.cpp",
-  "file": "/home/strv/Documents/repo/tiff/src/tiff_pal.cpp"
+  "directory": "/home/strv/repos/tiff_reader/build",
+  "command": "/usr/bin/c++ -I.././inc -fpermissive -g3 -O0 -Wall -Wextra -std=gnu++2a -o CMakeFiles/tiff2ppm.dir/src/tiff_reader.cpp.o -c /home/strv/repos/tiff_reader/src/tiff_reader.cpp",
+  "file": "/home/strv/repos/tiff_reader/src/tiff_reader.cpp"
 }
 ]

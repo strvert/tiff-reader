@@ -18,8 +18,8 @@ add_custom_target(copy_compile_commands ALL
 
 add_executable(tiff2ppm
     examples/tiff2ppm.cpp
+    examples/tiff_pal.cpp
     src/tiff_reader.cpp
-    src/tiff_pal.cpp
     )
 
 target_include_directories(tiff2ppm
