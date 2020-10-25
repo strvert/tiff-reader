@@ -1,7 +1,6 @@
 #ifndef __TIFF_READER_H
 #define __TIFF_READER_H
 
-#include <bits/stdint-uintn.h>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -241,6 +240,9 @@ class page
 public:
     page(page&&) noexcept = default;
     void print_info() const;
+
+    // int get_pixels(const uint32_t i, const uint32_t l, color_t *buf) const;
+    int get_pixels(const uint16_t, const uint16_t y, const size_t l, color_t *pixs) const;
     color_t get_pixel(const uint16_t x, const uint16_t y) const;
     color_t get_pixel_without_buffering(const uint16_t x, const uint16_t y) const;
 
@@ -250,6 +252,12 @@ public:
         }
     }
 
+    bool validate()
+    {
+        byte_per_pixel = calc_byte_per_pixel(sample_per_pixel, bit_per_samples);
+        return validate_bit_per_samples(sample_per_pixel, bit_per_samples);
+    }
+
 private:
     page(const class reader& r) :
         r(r), buffer_id(reserve_page_id()),
@@ -257,8 +265,8 @@ private:
         planar_configuration(planar_configuration_t::CONTIG)
     {}
 
-    static int reserve_page_id();
-    static void release_page_id(const int id);
+    static int32_t reserve_page_id();
+    static void release_page_id(const int32_t id);
 
     template<typename T>
     static T extract_memory(const void* buffer, const uint16_t pos, const uint16_t len_bits)
@@ -283,6 +291,9 @@ private:
 
         return ret;
     }
+
+    static uint8_t calc_byte_per_pixel(const uint16_t sample_per_pixel, const std::vector<uint16_t> &bit_per_samples);
+    static bool validate_bit_per_samples(const uint16_t sample_per_pixel, std::vector<uint16_t> &bit_per_samples);
 
     const class reader& r;
 
@@ -314,6 +325,7 @@ public:
 class reader {
     friend color_t page::get_pixel(const uint16_t, const uint16_t) const;
     friend color_t page::get_pixel_without_buffering(const uint16_t, const uint16_t) const;
+    friend int page::get_pixels(const uint16_t x, const uint16_t y, const size_t l, color_t *pixs) const;
 private:
     const std::string path;
     intptr_t source;
@@ -331,7 +343,6 @@ private:
     reader(const std::string& path);
 
     bool read_header();
-
     inline static bool platform_is_little_endian()
     {
         uint32_t t = 1;
