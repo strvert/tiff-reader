@@ -1,7 +1,6 @@
-#include "tiff_reader.h"
-#include "tiff_pal.h"
+#include "impls/tiff_reader.h"
+#include "impls/tiff_pal.h"
 
-#include <bits/stdint-uintn.h>
 #include <cstdint>
 #include <cstddef>
 #include <cstring>
@@ -124,9 +123,35 @@ int32_t page::reserve_page_id()
     return -1;
 }
 
-void page::release_page_id(const int32_t id) {
+void page::release_page_id(const int32_t id)
+{
     if (id >= static_cast<int32_t>(tiff_pal::PIX_BUF_COUNT)) return;
     tiff_pal::pix_buffer_statics[id].in_use = false;
+}
+
+uint8_t page::calc_byte_per_pixel(const uint16_t sample_per_pixel, const std::vector<uint16_t> &bit_per_samples)
+{
+    printf("spp: %d\n", sample_per_pixel);
+    if (bit_per_samples.size() != sample_per_pixel) {
+        if (bit_per_samples.size() >= 1) {
+            return (sample_per_pixel * bit_per_samples[0]) / 8;
+        }
+    }
+
+    uint16_t total_bits = 0;
+    for (auto& b: bit_per_samples) {
+        total_bits += b;
+    }
+    if (total_bits % 8 != 0) return 0;
+    return total_bits / 8;
+}
+
+bool page::validate_bit_per_samples(const uint16_t sample_per_pixel, std::vector<uint16_t> &bit_per_samples)
+{
+    while(bit_per_samples.size() < sample_per_pixel) {
+        bit_per_samples.push_back(bit_per_samples[0]);
+    }
+    return true;
 }
 
 void page::print_info() const
@@ -152,6 +177,57 @@ void page::print_info() const
     if (date_time.length() != 0) {
         printf("Date Time: %s\n", date_time.c_str());
     }
+}
+
+int page::get_pixels(const uint16_t x, const uint16_t y, const size_t l, color_t *pixs) const
+{
+    uint32_t ptr = (y*width + x) * byte_per_pixel;
+    uint16_t target_strip = 0;
+    uint32_t total_byte = 0;
+    for (auto& s: strip_byte_counts) {
+        if (total_byte + s > ptr) break;
+        total_byte += s;
+        target_strip++;
+    }
+
+    ptr -= total_byte;
+
+    // Specialized optimization
+    if (bit_per_samples == std::vector<uint16_t>{8, 8, 8, 8} && sample_per_pixel == 4 && colorspace == colorspace_t::RGB) {
+        r.fread_pos(pixs, strip_offsets[target_strip] + ptr, 4*l);
+        return l;
+    }
+
+    if (sample_per_pixel == 2 && colorspace == colorspace_t::MINISBLACK) {
+        tiff_pal::info_buffer_lock();
+        for (size_t i = 0; i < l; i++) {
+            r.fread_pos(tiff_pal::info_buffer, strip_offsets[target_strip] + ptr + (i*byte_per_pixel), byte_per_pixel);
+
+            pixs[i].r = extract_memory<uint8_t>(tiff_pal::info_buffer, 0, bit_per_samples[0]);
+            pixs[i].g = pixs[i].r;
+            pixs[i].b = pixs[i].r;
+            pixs[i].a = extract_memory<uint8_t>(tiff_pal::info_buffer, bit_per_samples[0], bit_per_samples[0]);
+        }
+        tiff_pal::info_buffer_unlock();
+        return l;
+    }
+
+    // General Processing
+    tiff_pal::info_buffer_lock();
+    for (size_t i = 0; i < l; i++) {
+        r.fread_pos(tiff_pal::info_buffer, strip_offsets[target_strip] + ptr + i*byte_per_pixel, byte_per_pixel);
+
+        uint8_t* c_u8[4] = {&pixs[i].r, &pixs[i].g, &pixs[i].b, &pixs[i].a};
+        uint8_t p = 0;
+        uint8_t start_pos = 0;
+        for (auto& b: bit_per_samples) {
+            *c_u8[p++] = extract_memory<uint8_t>(tiff_pal::info_buffer, start_pos, b);
+            start_pos += b;
+        }
+    }
+    tiff_pal::info_buffer_unlock();
+
+    return l;
 }
 
 color_t page::get_pixel(const uint16_t x, const uint16_t y) const
@@ -360,6 +436,10 @@ bool reader::read_entry_tags(const std::vector<ifd> &ifds, std::vector<page> &pa
         }
         page_index++;
     }
+
+    for (auto& page: pages) {
+        page.validate();
+    }
     return true;
 }
 
@@ -418,13 +498,6 @@ bool reader::tag_manager::bits_per_sample(const reader &r, const tag_entry &e, p
         p.bit_per_samples.resize(1);
         p.bit_per_samples[0] = read_scalar<uint16_t>(r, e);
     }
-
-    uint16_t total_bits = 0;
-    for (auto& b: p.bit_per_samples) {
-        total_bits += b;
-    }
-    if (total_bits % 8 != 0) return false;
-    p.byte_per_pixel = total_bits / 8;
     return true;
 }
 bool reader::tag_manager::compression(const reader &r, const tag_entry &e, page& p)
